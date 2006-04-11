@@ -1,17 +1,32 @@
-#include <syslog.h>
-#include <stdarg.h>
+// Specify that we want to use POSIX to work around
+
+#ifdef __linux__
+#define __USE_POSIX
+#define _POSIX_C_SOURCE 200112L
+#include <sys/vfs.h>
+#include <mntent.h>
+#else
 #include <sys/param.h>
+#include <sys/ucred.h>
 #include <sys/mount.h>
-#include <stdio.h>
-#include <sys/types.h>
-#include <dirent.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <sys/time.h>
+#endif
+
 #include <sys/resource.h>
+#include <sys/types.h>
+#include <sys/time.h>
+#include <sys/wait.h>
+
+#include <dirent.h>
 #include <errno.h>
 #include <signal.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <syslog.h>
+#include <time.h>
+#include <unistd.h>
+
 #include "main.h"
 
 extern int errno;
@@ -25,16 +40,17 @@ extern int errno;
 pid_t child;
 
 int main (int argc, char const* argv[]) {
+	openlog(argv[0], LOG_PID | LOG_CONS, LOG_DAEMON);
 
 	if (fork() > 0)	exit(EXIT_SUCCESS);
 	if (fork() > 0)	exit(EXIT_SUCCESS);
 	
-	openlog(argv[0], LOG_PERROR | LOG_PID, LOG_DAEMON);
+	syslog(LOG_INFO, "%s started", argv[0]);
 
 	struct sigaction sact;
 	struct sigaction * osact = NULL;
 	sact.sa_handler = &kill_children;
-	sact.sa_flags = SA_RESTART;
+	// Probably unnecessary: sact.sa_flags = SA_RESTART;
 	sigemptyset(&sact.sa_mask);	
 
 	if (sigaction(SIGALRM, &sact, osact) < 0) {
@@ -54,72 +70,95 @@ int main (int argc, char const* argv[]) {
 void check_mounts() {
 	time_t startTime = time(NULL);
 	
-	struct statfs *mounts;
 	int livemountcount = 0;
-	int mountcount = getmntinfo(&mounts, MNT_NOWAIT);
-	
-	time_t childStartTime;
-	
+	int mountcount = 0;
+
+#ifdef __linux__
+    FILE *fp; 
+    struct mntent *entry; 
+
+    fp = setmntent( _PATH_MOUNTED, "r" ); 
+
+    while ((entry = getmntent(fp)) != NULL ) { 
+		check_mount(entry->mnt_dir, entry->mnt_fsname);
+		mountcount++;
+    } 
+
+    endmntent( fp ); 
+#else
+	struct statfs *mounts;
+	mountcount = getmntinfo(&mounts, MNT_NOWAIT);
+
 	if (mountcount < 0) {
 		syslog(LOG_CRIT, "Error %d retrieving filesystem information: %m", errno);
 	}
-	
-	for (int i = 0; i < mountcount; i++) {
-		child = fork();
-		if (child < 0) {
-			syslog(LOG_ERR, "Error %d attempting to fork mount checking child for %s: %m", mounts[i].f_mntonname);
-		} else if (child == 0) {						
-			syslog(LOG_DEBUG, "Checking %s (%s)", mounts[i].f_mntonname, mounts[i].f_mntfromname);
-			
-			DIR* mountpoint = opendir(mounts[i].f_mntonname);
 
-			if (!mountpoint) {
-				syslog(LOG_ERR, "Couldn't open directory %s: %m", mounts[i].f_mntonname);
-				exit(EXIT_FAILURE);
-			}
+	for (int i = 0; i < mountcount; i++) {
+		check_mount(mounts[i].f_mntonname, mounts[i].f_mntfromname);
+	}
+#endif
+
+	syslog(LOG_INFO, "Checked %u mounts in %i seconds: %u live", livemountcount, (int)(time(NULL) - startTime), mountcount);
+}
+	
+
+bool check_mount(const char* path, const char* source) {
+	child = fork();
+	if (child < 0) {
+		syslog(LOG_ERR, "Error %d attempting to fork mount checking child for %s: %m", errno, path);
+	} else if (child == 0) {						
+		syslog(LOG_DEBUG, "Checking %s (%s)", path, source);
 			
-			int direntc = 0;
-			struct dirent *dp;
-			while ((dp = readdir(mountpoint)) != NULL) {
-				direntc++;
-			}
+		DIR* mountpoint = opendir(path);
+
+		if (!mountpoint) {
+			syslog(LOG_ERR, "Couldn't open directory %s: %m", path);
+			exit(EXIT_FAILURE);
+		}
 			
-			if (closedir(mountpoint) != 0) {
-				syslog(LOG_ERR, "Unable to close directory %s: %m", mounts[i].f_mntonname);
-				exit(EXIT_FAILURE);
-			}
+		int direntc = 0;
+		struct dirent *dp;
+		while ((dp = readdir(mountpoint)) != NULL) {
+			direntc++;
+		}
 			
-			syslog(LOG_DEBUG, "%s contains %i files", mounts[i].f_mntonname, direntc);
-			exit(EXIT_SUCCESS);
-		} else {
-			childStartTime = time(NULL);
-			int status = 0;
+		if (closedir(mountpoint) != 0) {
+			syslog(LOG_ERR, "Unable to close directory %s: %m", path);
+			exit(EXIT_FAILURE);
+		}
 			
-			alarm(15);
-			waitpid(child, &status, 0);
-			alarm(0);	
+		syslog(LOG_DEBUG, "%s contains %i files", path, direntc);
+		exit(EXIT_SUCCESS);
+	} else {
+		int status = 0;
 			
-			if (WIFEXITED(status)) {
-				if (WEXITSTATUS(status) == EXIT_SUCCESS) {
-					livemountcount++;
-				} else {
-					syslog(LOG_ERR, "Child process %i returned %i while checking %s!", child, WEXITSTATUS(status), mounts[i].f_mntonname);
-				} 
-			} else if (WIFSIGNALED(status)) {
-				syslog(LOG_ERR, "Child process %i terminated on signal %i while checking %s!", child, WTERMSIG(status), mounts[i].f_mntonname);
+		alarm(15);
+		waitpid(child, &status, 0);
+		alarm(0);	
+
+		if (WIFEXITED(status)) {
+			if (WEXITSTATUS(status) == EXIT_SUCCESS) {
+				return true;
 			} else {
-				syslog(LOG_ERR, "Child process %i terminated with status %i while checking %s!", child, WEXITSTATUS(status), mounts[i].f_mntonname);
-			}
+				syslog(LOG_ERR, "Child process %i returned %i while checking %s!", child, WEXITSTATUS(status), path);
+			} 
+		} else if (WIFSIGNALED(status)) {
+			syslog(LOG_ERR, "Child process %i terminated on signal %i while checking %s!", child, WTERMSIG(status), path);
+		} else {
+			syslog(LOG_ERR, "Child process %i terminated with status %i while checking %s!", child, WEXITSTATUS(status), path);
 		}
 	}
-	
-	syslog(LOG_INFO, "Checked %u mounts in %u seconds: %u live", livemountcount, (time(NULL) - startTime), mountcount);
+
+	return false;
 }
 
 void kill_children(int sig) {
 	if (child > 0) {
 		syslog(LOG_INFO, "Timed out waiting for child process %i: sending SIGKILL", child);
-		kill(child, SIGKILL);
+		int rc = kill(child, SIGKILL);
+		if (rc != 0) {
+			syslog(LOG_ERR, "Unable to kill child process %i: %m", child);
+		}
 	} else {
 		syslog(LOG_INFO, "received an unexplained SIGALARM!");
 	}
