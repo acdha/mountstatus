@@ -33,7 +33,6 @@ extern int errno;
 
 /*
 	TODO:
-		- Switch to using SIGARLM instead of polling
 		- Command-line arguments to replace hard-coded values
 */
 
