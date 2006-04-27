@@ -15,6 +15,7 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 
 #include <dirent.h>
 #include <errno.h>
@@ -111,6 +112,18 @@ bool check_mount(const char* path, const char* source) {
 		syslog(LOG_ERR, "Error %d attempting to fork mount checking child for %s: %m", errno, path);
 	} else if (child == 0) {						
 		syslog(LOG_DEBUG, "Checking %s (%s)", path, source);
+
+		struct stat mountstat;
+		if (stat(path, &mountstat) != 0) {
+			syslog(LOG_ERR, "Couldn't stat %s: %m", path);
+			exit(EXIT_FAILURE);
+		}
+
+		// Change to the UID of the mount owner to handle mountpoints with restrictive permissions:
+		if (setuid(mountstat.st_uid) != 0) {
+			syslog(LOG_ERR, "Couldn't setuid(%d): %m", mountstat.st_uid);
+			exit(EXIT_FAILURE);
+		}
 			
 		DIR* mountpoint = opendir(path);
 
