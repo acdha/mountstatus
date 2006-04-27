@@ -80,7 +80,9 @@ void check_mounts() {
     fp = setmntent( _PATH_MOUNTED, "r" ); 
 
     while ((entry = getmntent(fp)) != NULL ) { 
-		check_mount(entry->mnt_dir, entry->mnt_fsname);
+		if (check_mount(entry->mnt_dir, entry->mnt_fsname)) {
+			livemountcount++;
+		}
 		mountcount++;
     } 
 
@@ -94,7 +96,9 @@ void check_mounts() {
 	}
 
 	for (int i = 0; i < mountcount; i++) {
-		check_mount(mounts[i].f_mntonname, mounts[i].f_mntfromname);
+		if (check_mount(mounts[i].f_mntonname, mounts[i].f_mntfromname)) {
+			livemountcount++;
+		}
 	}
 #endif
 
