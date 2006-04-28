@@ -44,7 +44,12 @@ int main (int argc, char const* argv[]) {
 
 	if (fork() > 0)	exit(EXIT_SUCCESS);
 	if (fork() > 0)	exit(EXIT_SUCCESS);
-	
+
+	if (chdir("/") != 0) {
+		syslog(LOG_ERR, "Couldn't chdir(/): %m");
+		exit(EXIT_FAILURE);
+	}
+
 	syslog(LOG_INFO, "%s started", argv[0]);
 
 	struct sigaction sact;
