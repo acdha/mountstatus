@@ -27,6 +27,8 @@
 #include <syslog.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <limits.h>
 
 #include "main.h"
 
@@ -40,10 +42,24 @@ extern int errno;
 pid_t child;
 
 int main (int argc, char const* argv[]) {
-	openlog(argv[0], LOG_PID | LOG_CONS, LOG_DAEMON);
+	// Close all file handles:
+	fflush(NULL);
+
+	for (int fd = _POSIX_OPEN_MAX; fd >= 0; fd--) {
+		close(fd);
+	}
 
 	if (fork() > 0)	exit(EXIT_SUCCESS);
 	if (fork() > 0)	exit(EXIT_SUCCESS);
+
+	setsid();
+
+	openlog(argv[0], LOG_PID | LOG_NDELAY | LOG_NOWAIT, LOG_DAEMON);
+
+	while (getppid() != 1) {
+		syslog(LOG_DEBUG, "Waiting for init to become our parent process");
+		sleep(1);
+	}
 
 	if (chdir("/") != 0) {
 		syslog(LOG_ERR, "Couldn't chdir(/): %m");
@@ -55,7 +71,6 @@ int main (int argc, char const* argv[]) {
 	struct sigaction sact;
 	struct sigaction * osact = NULL;
 	sact.sa_handler = &kill_children;
-	// Probably unnecessary: sact.sa_flags = SA_RESTART;
 	sigemptyset(&sact.sa_mask);	
 
 	if (sigaction(SIGALRM, &sact, osact) < 0) {
@@ -107,7 +122,11 @@ void check_mounts() {
 	}
 #endif
 
-	syslog(LOG_INFO, "Checked %u mounts in %i seconds: %u live", livemountcount, (int)(time(NULL) - startTime), mountcount);
+	if (mountcount != livemountcount) {
+		syslog(LOG_INFO, "Checked %u mounts in %i seconds: %u dead", livemountcount, (int)(time(NULL) - startTime), mountcount - livemountcount);
+	} else {
+		syslog(LOG_INFO, "Checked %u mounts in %i seconds", livemountcount, (int)(time(NULL) - startTime));
+	}
 }
 	
 
