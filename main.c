@@ -29,6 +29,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <libgen.h>
 
 #include "main.h"
 
@@ -42,6 +43,11 @@ extern int errno;
 pid_t child;
 
 int main (int argc, char const* argv[]) {
+	if (getuid() > 0) {
+		fprintf(stderr, "%s must be run as root\n", argv[0]);
+		exit(EXIT_FAILURE);
+	}
+	
 	// Close all file handles:
 	fflush(NULL);
 
@@ -54,10 +60,9 @@ int main (int argc, char const* argv[]) {
 
 	setsid();
 
-	openlog(argv[0], LOG_PID | LOG_NDELAY | LOG_NOWAIT, LOG_DAEMON);
+	openlog(basename((char*)argv[0]), LOG_PID | LOG_NDELAY | LOG_NOWAIT, LOG_DAEMON);
 
 	while (getppid() != 1) {
-		syslog(LOG_DEBUG, "Waiting for init to become our parent process");
 		sleep(1);
 	}
 
@@ -135,9 +140,8 @@ bool check_mount(const char* path, const char* source) {
 	if (child < 0) {
 		syslog(LOG_ERR, "Error %d attempting to fork mount checking child for %s: %m", errno, path);
 	} else if (child == 0) {						
-		syslog(LOG_DEBUG, "Checking %s (%s)", path, source);
-
 		struct stat mountstat;
+
 		if (stat(path, &mountstat) != 0) {
 			syslog(LOG_ERR, "Couldn't stat %s: %m", path);
 			exit(EXIT_FAILURE);
@@ -167,17 +171,17 @@ bool check_mount(const char* path, const char* source) {
 			exit(EXIT_FAILURE);
 		}
 			
-		syslog(LOG_DEBUG, "%s contains %i files", path, direntc);
 		exit(EXIT_SUCCESS);
 	} else {
 		int status = 0;
 			
 		alarm(15);
 		waitpid(child, &status, 0);
-		alarm(0);	
+		alarm(0);
 
 		if (WIFEXITED(status)) {
 			if (WEXITSTATUS(status) == EXIT_SUCCESS) {
+				syslog(LOG_DEBUG, "Child process %i returned %i while checking %s!", child, WEXITSTATUS(status), path);
 				return true;
 			} else {
 				syslog(LOG_ERR, "Child process %i returned %i while checking %s!", child, WEXITSTATUS(status), path);
