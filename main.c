@@ -181,7 +181,6 @@ bool check_mount(const char* path, const char* source) {
 
 		if (WIFEXITED(status)) {
 			if (WEXITSTATUS(status) == EXIT_SUCCESS) {
-				syslog(LOG_DEBUG, "Child process %i returned %i while checking %s!", child, WEXITSTATUS(status), path);
 				return true;
 			} else {
 				syslog(LOG_ERR, "Child process %i returned %i while checking %s!", child, WEXITSTATUS(status), path);
