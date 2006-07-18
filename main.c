@@ -48,6 +48,10 @@ int main (int argc, char const* argv[]) {
 		exit(EXIT_FAILURE);
 	}
 	
+	if (argc > 1) {
+		fprintf(stderr, "%s does not accept command-line arguments\n", argv[0]);
+	}
+	
 	// Close all file handles:
 	fflush(NULL);
 
@@ -75,7 +79,7 @@ int main (int argc, char const* argv[]) {
 
 	struct sigaction sact;
 	struct sigaction * osact = NULL;
-	sact.sa_handler = &kill_children;
+	sact.sa_handler = (void*) &kill_children;
 	sigemptyset(&sact.sa_mask);	
 
 	if (sigaction(SIGALRM, &sact, osact) < 0) {
@@ -121,7 +125,7 @@ void check_mounts() {
 	}
 
 	for (int i = 0; i < mountcount; i++) {
-		if (check_mount(mounts[i].f_mntonname, mounts[i].f_mntfromname)) {
+		if (check_mount(mounts[i].f_mntonname)) {
 			livemountcount++;
 		}
 	}
@@ -135,7 +139,7 @@ void check_mounts() {
 }
 	
 
-bool check_mount(const char* path, const char* source) {
+bool check_mount(const char* path) {
 	child = fork();
 	if (child < 0) {
 		syslog(LOG_ERR, "Error %d attempting to fork mount checking child for %s: %m", errno, path);
@@ -171,7 +175,7 @@ bool check_mount(const char* path, const char* source) {
 			exit(EXIT_FAILURE);
 		}
 			
-		exit(EXIT_SUCCESS);
+		exit(42);
 	} else {
 		int status = 0;
 			
@@ -180,7 +184,7 @@ bool check_mount(const char* path, const char* source) {
 		alarm(0);
 
 		if (WIFEXITED(status)) {
-			if (WEXITSTATUS(status) == EXIT_SUCCESS) {
+			if (WEXITSTATUS(status) == 42) {
 				return true;
 			} else {
 				syslog(LOG_ERR, "Child process %i returned %i while checking %s!", child, WEXITSTATUS(status), path);
@@ -195,7 +199,7 @@ bool check_mount(const char* path, const char* source) {
 	return false;
 }
 
-void kill_children(int sig) {
+void kill_children() {
 	if (child > 0) {
 		syslog(LOG_INFO, "Timed out waiting for child process %i: sending SIGKILL", child);
 		int rc = kill(child, SIGKILL);
