@@ -30,6 +30,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <libgen.h>
+#include <string.h>
 
 #include "main.h"
 
@@ -78,12 +79,21 @@ int main (int argc, char const* argv[]) {
 	syslog(LOG_INFO, "%s started", argv[0]);
 
 	struct sigaction sact;
-	struct sigaction * osact = NULL;
+	memset(&sact, 0, sizeof sact);
 	sact.sa_handler = (void*) &kill_children;
 	sigemptyset(&sact.sa_mask);	
 
-	if (sigaction(SIGALRM, &sact, osact) < 0) {
+	if (sigaction(SIGALRM, &sact, 0) < 0) {
 		syslog(LOG_ERR, "Cannot install SIGALRM handler: %m");
+		exit(EXIT_FAILURE);
+	}
+
+	// Reuse sact to set the SIGCHLD handler to avoid zombies:
+	memset(&sact, 0, sizeof sact);
+	sact.sa_flags = SA_NOCLDWAIT;
+
+	if (sigaction(SIGCHLD, &sact, 0) < 0) {
+		syslog(LOG_ERR, "Cannot install SIGCHLD handler: %m");
 		exit(EXIT_FAILURE);
 	}
 
