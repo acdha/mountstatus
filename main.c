@@ -88,17 +88,12 @@ int main (int argc, char const* argv[]) {
 		exit(EXIT_FAILURE);
 	}
 
-	// Reuse sact to set the SIGCHLD handler to avoid zombies:
-	memset(&sact, 0, sizeof sact);
-	sact.sa_flags = SA_NOCLDWAIT;
-
-	if (sigaction(SIGCHLD, &sact, 0) < 0) {
-		syslog(LOG_ERR, "Cannot install SIGCHLD handler: %m");
-		exit(EXIT_FAILURE);
-	}
+	int zombiestatus;
 
 	while (1==1) {
 		check_mounts();
+		// We'll reap any zombies just in case:
+      	while (waitpid(-1, &zombiestatus, WNOHANG) > 0);
 		sleep(180);
 	}
 	
@@ -119,7 +114,7 @@ void check_mounts() {
     fp = setmntent( _PATH_MOUNTED, "r" ); 
 
     while ((entry = getmntent(fp)) != NULL ) { 
-		if (check_mount(entry->mnt_dir, entry->mnt_fsname)) {
+		if (check_mount(entry->mnt_dir)) {
 			livemountcount++;
 		}
 		mountcount++;
@@ -189,7 +184,7 @@ bool check_mount(const char* path) {
 	} else {
 		int status = 0;
 			
-		alarm(15);
+		alarm(60);
 		waitpid(child, &status, 0);
 		alarm(0);
 
