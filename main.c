@@ -157,12 +157,12 @@ bool check_mount(const char* path) {
 		}
 
 		// Change to the UID of the mount owner to handle mountpoints with restrictive permissions:
-		if (setuid(mountstat.st_uid) != 0) {
-			syslog(LOG_ERR, "Couldn't setuid(%d): %m", mountstat.st_uid);
-			exit(EXIT_FAILURE);
-		}
 		if (setgid(mountstat.st_gid) != 0) {
 			syslog(LOG_ERR, "Couldn't setgid(%d): %m", mountstat.st_gid);
+			exit(EXIT_FAILURE);
+		}
+		if (setuid(mountstat.st_uid) != 0) {
+			syslog(LOG_ERR, "Couldn't setuid(%d): %m", mountstat.st_uid);
 			exit(EXIT_FAILURE);
 		}
 			
