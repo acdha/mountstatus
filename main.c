@@ -161,6 +161,10 @@ bool check_mount(const char* path) {
 			syslog(LOG_ERR, "Couldn't setuid(%d): %m", mountstat.st_uid);
 			exit(EXIT_FAILURE);
 		}
+		if (setgid(mountstat.st_gid) != 0) {
+			syslog(LOG_ERR, "Couldn't setgid(%d): %m", mountstat.st_gid);
+			exit(EXIT_FAILURE);
+		}
 			
 		DIR* mountpoint = opendir(path);
 
