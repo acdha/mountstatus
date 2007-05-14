@@ -59,8 +59,8 @@ int main (int argc, char const* argv[]) {
 		close(fd);
 	}
 
-	if (fork() > 0)	exit(EXIT_SUCCESS);
-	if (fork() > 0)	exit(EXIT_SUCCESS);
+	if (fork() > 0) exit(EXIT_SUCCESS);
+	if (fork() > 0) exit(EXIT_SUCCESS);
 
 	setsid();
 
@@ -71,17 +71,17 @@ int main (int argc, char const* argv[]) {
 	}
 
 	if (chdir("/") != 0) {
-		syslog(LOG_ERR, "Couldn't chdir(/): %m");
+		syslog(LOG_ERR, "Couldn't chdir(/): errno %d: %m", errno);
 		exit(EXIT_FAILURE);
 	}
 
 	struct sigaction sact;
 	memset(&sact, 0, sizeof sact);
 	sact.sa_handler = (void*) &kill_children;
-	sigemptyset(&sact.sa_mask);	
+	sigemptyset(&sact.sa_mask); 
 
 	if (sigaction(SIGALRM, &sact, 0) < 0) {
-		syslog(LOG_ERR, "Cannot install SIGALRM handler: %m");
+		syslog(LOG_ERR, "Cannot install SIGALRM handler: errno %d: %m", errno);
 		exit(EXIT_FAILURE);
 	}
 
@@ -92,7 +92,7 @@ int main (int argc, char const* argv[]) {
 	while (1==1) {
 		check_mounts();
 		// We'll reap any zombies just in case:
-      	while (waitpid(-1, &zombiestatus, WNOHANG) > 0);
+				while (waitpid(-1, &zombiestatus, WNOHANG) > 0);
 		sleep(180);
 	}
 	
@@ -107,25 +107,25 @@ void check_mounts() {
 	int mountcount = 0;
 
 #ifdef __linux__
-    FILE *fp; 
-    struct mntent *entry; 
+		FILE *fp; 
+		struct mntent *entry; 
 
-    fp = setmntent( _PATH_MOUNTED, "r" ); 
+		fp = setmntent( _PATH_MOUNTED, "r" ); 
 
-    while ((entry = getmntent(fp)) != NULL ) { 
+		while ((entry = getmntent(fp)) != NULL ) { 
 		if (check_mount(entry->mnt_dir)) {
 			livemountcount++;
 		}
 		mountcount++;
-    } 
+		} 
 
-    endmntent( fp ); 
+		endmntent( fp ); 
 #else
 	struct statfs *mounts;
 	mountcount = getmntinfo(&mounts, MNT_NOWAIT);
 
 	if (mountcount < 0) {
-		syslog(LOG_CRIT, "Error %d retrieving filesystem information: %m", errno);
+		syslog(LOG_CRIT, "Couldn't retrieve filesystem information: errno %d: %m", errno);
 	}
 
 	for (int i = 0; i < mountcount; i++) {
@@ -146,34 +146,34 @@ void check_mounts() {
 bool check_mount(const char* path) {
 	child = fork();
 	if (child < 0) {
-		syslog(LOG_ERR, "Error %d attempting to fork a child to check %s: %m", errno, path);
+		syslog(LOG_ERR, "Couldn't fork a child to check mountpoint %s: errno %d: %m", path, errno);
 	} else if (child == 0) {						
 		struct stat mountstat;
-
+		
 		if (stat(path, &mountstat) != 0) {
-			syslog(LOG_ERR, "Couldn't stat mountpoint %s: %m", path);
-			exit(EXIT_FAILURE);
+			syslog(LOG_INFO, "Couldn't stat mountpoint %s: errno %d: %m", path, errno);
+			exit(42);
 		}
 
 		if ((mountstat.st_mode & 0x111) == 0) {
-			syslog(LOG_INFO, "Unable to check mountpoint %s: mode %05x doesn't allow access!", path, mountstat.st_mode);
-			exit(EXIT_FAILURE);
+			syslog(LOG_INFO, "Couldn't check mountpoint %s: mode %3x does not allow access", path, mountstat.st_mode);
+			exit(42);
 		}
 
 		// Change to the UID of the mount owner to handle mountpoints with restrictive permissions:
 		if (setgid(mountstat.st_gid) != 0) {
-			syslog(LOG_ERR, "Couldn't setgid(%d): %m", mountstat.st_gid);
+			syslog(LOG_ERR, "Couldn't setgid(%d): errno %d: %m", mountstat.st_gid, errno);
 			exit(EXIT_FAILURE);
 		}
 		if (setuid(mountstat.st_uid) != 0) {
-			syslog(LOG_ERR, "Couldn't setuid(%d): %m", mountstat.st_uid);
+			syslog(LOG_ERR, "Couldn't setuid(%d): errno %d: %m", mountstat.st_uid, errno);
 			exit(EXIT_FAILURE);
 		}
 		
 		DIR* mountpoint = opendir(path);
 
 		if (!mountpoint) {
-			syslog(LOG_ERR, "Couldn't open directory %s: %m", path);
+			syslog(LOG_ERR, "Couldn't open directory %s: errno %d: %m", path, errno);
 			exit(EXIT_FAILURE);
 		}
 			
@@ -184,7 +184,7 @@ bool check_mount(const char* path) {
 		}
 			
 		if (closedir(mountpoint) != 0) {
-			syslog(LOG_ERR, "Unable to close directory %s: %m", path);
+			syslog(LOG_ERR, "Couldn't close directory %s: errno %d: %m", path, errno);
 			exit(EXIT_FAILURE);
 		}
 			
@@ -217,9 +217,9 @@ void kill_children() {
 		syslog(LOG_INFO, "Timed out waiting for child process %i: sending SIGKILL", child);
 		int rc = kill(child, SIGKILL);
 		if (rc != 0) {
-			syslog(LOG_ERR, "Unable to kill child process %i: %m", child);
+			syslog(LOG_ERR, "Couldn't kill child process %i: errno %d: %m", child, errno);
 		}
 	} else {
-		syslog(LOG_INFO, "received an unexplained SIGALARM!");
+		syslog(LOG_INFO, "Received an unexpected SIGALARM!");
 	}
 }
