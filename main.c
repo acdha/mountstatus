@@ -1,5 +1,4 @@
-// Specify that we want to use POSIX to work around
-
+// Specify that we want to use POSIX to work around an oddity in the Linux mntent code:
 #ifdef __linux__
 #define __USE_POSIX
 #define _POSIX_C_SOURCE 200112L
@@ -76,8 +75,6 @@ int main (int argc, char const* argv[]) {
 		exit(EXIT_FAILURE);
 	}
 
-	syslog(LOG_INFO, "%s started", argv[0]);
-
 	struct sigaction sact;
 	memset(&sact, 0, sizeof sact);
 	sact.sa_handler = (void*) &kill_children;
@@ -89,6 +86,8 @@ int main (int argc, char const* argv[]) {
 	}
 
 	int zombiestatus;
+
+	syslog(LOG_INFO, "%s started", argv[0]);
 
 	while (1==1) {
 		check_mounts();
@@ -147,12 +146,17 @@ void check_mounts() {
 bool check_mount(const char* path) {
 	child = fork();
 	if (child < 0) {
-		syslog(LOG_ERR, "Error %d attempting to fork mount checking child for %s: %m", errno, path);
+		syslog(LOG_ERR, "Error %d attempting to fork a child to check %s: %m", errno, path);
 	} else if (child == 0) {						
 		struct stat mountstat;
 
 		if (stat(path, &mountstat) != 0) {
-			syslog(LOG_ERR, "Couldn't stat %s: %m", path);
+			syslog(LOG_ERR, "Couldn't stat mountpoint %s: %m", path);
+			exit(EXIT_FAILURE);
+		}
+
+		if ((mountstat.st_mode & 0x111) == 0) {
+			syslog(LOG_INFO, "Unable to check mountpoint %s: mode %05x doesn't allow access!", path, mountstat.st_mode);
 			exit(EXIT_FAILURE);
 		}
 
@@ -165,7 +169,7 @@ bool check_mount(const char* path) {
 			syslog(LOG_ERR, "Couldn't setuid(%d): %m", mountstat.st_uid);
 			exit(EXIT_FAILURE);
 		}
-			
+		
 		DIR* mountpoint = opendir(path);
 
 		if (!mountpoint) {
