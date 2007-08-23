@@ -6,4 +6,7 @@ all:
 	$(CC) $(CFLAGS) -o build/MountStatusMonitor main.c
 
 clean:
-	/bin/rm -rf build
+	rm -rf build
+
+install: all
+	install -m 555 -o root -g 0 build/MountStatusMonitor /usr/local/sbin/MountStatusMonitor 	
