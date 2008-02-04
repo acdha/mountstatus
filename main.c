@@ -174,7 +174,12 @@ bool check_mount(const char* path) {
 
 		if (!mountpoint) {
 			syslog(LOG_ERR, "Couldn't open directory %s: errno %d: %m", path, errno);
-			exit(EXIT_FAILURE);
+
+			if (errno == EACCES) { 
+				exit (42); 
+			} else { 
+				exit (EXIT_FAILURE); 
+			}
 		}
 			
 		int direntc = 0;
