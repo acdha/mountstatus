@@ -29,9 +29,11 @@ What it does
 
 MountStatusMonitor provides the missing notification piece and is a handy tool
 for anyone who uses imperfect storage. It's a simple daemon which periodically
-checks every mounted filesystem for failures and unlike most other monitoring
-tools MountStatusMonitor robustly handles every failure mode, even the ones
-which cause unrecoverable client hangs.
+checks every mounted filesystem for failures and, unlike most other monitoring
+tools, MountStatusMonitor robustly handles the various failure modes which
+result in a hang because it works by fork()ing a child process which attempts
+to list the contents of the mountpoint and will trigger an error if the child 
+never returns.
 
 Normally it syslogs a message like this after running:
 
