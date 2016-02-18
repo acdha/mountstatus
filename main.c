@@ -35,11 +35,6 @@
 
 extern int errno;
 
-/*
-	TODO:
-		- Command-line arguments to replace hard-coded values
-*/
-
 pid_t child;
 
 int main (int argc, char const* argv[]) {
