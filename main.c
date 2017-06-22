@@ -37,37 +37,101 @@ extern int errno;
 
 pid_t child;
 
+#define _GNU_SOURCE
+#include <getopt.h>
+
+void output(int err, char * msg) 
+{
+	syslog(err, msg);
+	if (err != LOG_INFO)
+		fprintf(stdout, "%s\n", msg);
+}
+void output_and_exit(int err, char *msg, int exitcode)
+{
+	output(err, msg);
+	exit(exitcode);
+}
+
 int main (int argc, char const* argv[]) {
+
+	static int nodaemon = 0;
+	static int print = 0;
+	int c;
+	char msg[255];
+	
 	if (getuid() > 0) {
 		fprintf(stderr, "%s must be run as root\n", argv[0]);
 		exit(EXIT_FAILURE);
 	}
 
-	if (argc > 1) {
-		fprintf(stderr, "%s does not accept command-line arguments\n", argv[0]);
+	while (1)
+	{
+		static struct option long_options[] =
+		{
+			{"print", 	no_argument, &print, 	1},
+			{"nodaemon",	no_argument, &nodaemon, 1},
+			{0, 0, 0, 0}
+		};
+		/* getopt_long stores the option index here. */
+		int option_index = 0;
+	
+		c = getopt_long (argc, argv, "pn",
+			long_options, &option_index);
+
+		/* Detect the end of the options. */
+		if (c == -1)
+			break;
+
+		switch (c)
+		{
+			case 'p':
+				print = 1;
+				break;
+			case 'n':
+				nodaemon = 1;
+				break;
+		}
+
 	}
 
-	// Close all file handles:
-	fflush(NULL);
+	if (optind < argc)
+	{
+		output(1,  "Invalid command line arguments\n");
 
-	for (int fd = _POSIX_OPEN_MAX; fd >= 0; fd--) {
-		close(fd);
+		fprintf(stderr, "Invalid command line arguments\n");
+		exit(1);
+
+		// Close all file handles:
+		fflush(NULL);
 	}
 
-	if (fork() > 0) exit(EXIT_SUCCESS);
-	if (fork() > 0) exit(EXIT_SUCCESS);
+
+	if (nodaemon == 0)
+	{
+		for (int fd = _POSIX_OPEN_MAX; fd >= 0; fd--) {
+			close(fd);
+		}
+
+		if (fork() > 0) exit(EXIT_SUCCESS);
+		if (fork() > 0) exit(EXIT_SUCCESS);
+	}
 
 	setsid();
 
 	openlog(basename((char*)argv[0]), LOG_PID | LOG_NDELAY | LOG_NOWAIT, LOG_DAEMON);
 
-	while (getppid() != 1) {
-		sleep(1);
+	if (nodaemon == 0)
+	{
+		while (getppid() != 1) {
+			sleep(1);
+		}
 	}
 
 	if (chdir("/") != 0) {
-		syslog(LOG_ERR, "Couldn't chdir(/): errno %d: %m", errno);
-		exit(EXIT_FAILURE);
+		//syslog(LOG_ERR, "Couldn't chdir(/): errno %d: %m", errno);
+		sprintf(msg, "Couldn't chdir(/): errno %d: %m", errno);
+		output_and_exit(LOG_ERR, msg, EXIT_FAILURE);
+		//exit(EXIT_FAILURE);
 	}
 
 	struct sigaction sact;
@@ -76,18 +140,21 @@ int main (int argc, char const* argv[]) {
 	sigemptyset(&sact.sa_mask);
 
 	if (sigaction(SIGALRM, &sact, 0) < 0) {
-		syslog(LOG_ERR, "Cannot install SIGALRM handler: errno %d: %m", errno);
-		exit(EXIT_FAILURE);
+		sprintf(msg, "Cannot install SIGALRM handler: errno %d: %m", errno);
+		output_and_exit(LOG_ERR, msg, EXIT_FAILURE);
 	}
 
 	int zombiestatus;
 
-	syslog(LOG_INFO, "%s started", argv[0]);
+	sprintf(msg, "%s started", argv[0]);
+	output(LOG_INFO, msg);
 
 	while (1==1) {
 		check_mounts();
 		// We'll reap any zombies just in case:
 		while (waitpid(-1, &zombiestatus, WNOHANG) > 0);
+		if (nodaemon == 1)
+			break;
 		sleep(180);
 	}
 
@@ -95,12 +162,15 @@ int main (int argc, char const* argv[]) {
 	return(0);
 }
 
+
 void check_mounts() {
+	int rc = 0;
 	time_t startTime = time(NULL);
 
 	int livemountcount = 0;
 	int mountcount = 0;
 
+	char msg[255];
 #ifdef __linux__
     FILE *fp;
     struct mntent *entry;
@@ -120,7 +190,8 @@ void check_mounts() {
 	mountcount = getmntinfo(&mounts, MNT_NOWAIT);
 
 	if (mountcount < 0) {
-		syslog(LOG_CRIT, "Couldn't retrieve filesystem information: errno %d: %m", errno);
+		sprintf(msg, "Couldn't retrieve filesystem information: errno %d: %m", errno);
+		output(LOG_CRIT, msg);
 	}
 
 	for (int i = 0; i < mountcount; i++) {
@@ -131,49 +202,54 @@ void check_mounts() {
 #endif
 
 	if (mountcount != livemountcount) {
-		syslog(LOG_INFO, "Checked %u mounts in %i seconds: %u dead", livemountcount, (int)(time(NULL) - startTime), mountcount - livemountcount);
+		rc = LOG_ERR;
+		sprintf(msg, "Checked %u mounts in %i seconds: %u dead", livemountcount, (int)(time(NULL) - startTime), mountcount - livemountcount);
 	} else {
-		syslog(LOG_INFO, "Checked %u mounts in %i seconds", livemountcount, (int)(time(NULL) - startTime));
+		rc = LOG_INFO;
+		sprintf(msg, "Checked %u mounts in %i seconds", livemountcount, (int)(time(NULL) - startTime));
 	}
+	output(rc, msg);
 }
 
 
 bool check_mount(const char* path) {
+	char msg[255];
 	child = fork();
 	if (child < 0) {
-        syslog(LOG_ERR, "Couldn't fork a child to check mountpoint %s: errno %d: %m", path, errno);
+        	sprintf(msg, "Couldn't fork a child to check mountpoint %s: errno %d: %m", path, errno);
+		output(LOG_ERR, msg);
 	} else if (child == 0) {
 		struct stat mountstat;
 
 		if (stat(path, &mountstat) != 0) {
-			syslog(LOG_INFO, "Couldn't stat mountpoint %s: errno %d: %m", path, errno);
-			exit(42);
+			sprintf(msg, "Couldn't stat mountpoint %s: errno %d: %m", path, errno);
+			output_and_exit(LOG_ERR, msg,42);
 		}
 
 		if ((mountstat.st_mode & 0x111) == 0) {
-			syslog(LOG_INFO, "Couldn't check mountpoint %s: mode %3x does not allow access", path, mountstat.st_mode);
-			exit(42);
+			sprintf(msg, "Couldn't check mountpoint %s: mode %3x does not allow access", path, mountstat.st_mode);
+			output_and_exit(LOG_ERR, msg,42);
 		}
 
 		// Change to the UID of the mount owner to handle mountpoints with restrictive permissions:
 		if (setgid(mountstat.st_gid) != 0) {
-			syslog(LOG_ERR, "Couldn't setgid(%d): errno %d: %m", mountstat.st_gid, errno);
-			exit(EXIT_FAILURE);
+			sprintf(msg, "Couldn't setgid(%d): errno %d: %m", mountstat.st_gid, errno);
+			output_and_exit(LOG_ERR, msg, EXIT_FAILURE);
 		}
 		if (setuid(mountstat.st_uid) != 0) {
-			syslog(LOG_ERR, "Couldn't setuid(%d): errno %d: %m", mountstat.st_uid, errno);
-			exit(EXIT_FAILURE);
+			sprintf(msg, "Couldn't setuid(%d): errno %d: %m", mountstat.st_uid, errno);
+			output_and_exit(LOG_ERR, msg, EXIT_FAILURE);
 		}
 
 		DIR* mountpoint = opendir(path);
 
 		if (!mountpoint) {
-			syslog(LOG_ERR, "Couldn't open directory %s: errno %d: %m", path, errno);
+			sprintf(msg, "Couldn't open directory %s: errno %d: %m", path, errno);
 
 			if (errno == EACCES) {
-				exit (42);
+				output_and_exit(LOG_INFO, msg,42);
 			} else {
-				exit (EXIT_FAILURE);
+				output_and_exit(LOG_ERR, msg, EXIT_FAILURE);
 			}
 		}
 
@@ -184,8 +260,8 @@ bool check_mount(const char* path) {
 		}
 
 		if (closedir(mountpoint) != 0) {
-			syslog(LOG_ERR, "Couldn't close directory %s: errno %d: %m", path, errno);
-			exit(EXIT_FAILURE);
+			sprintf(msg, "Couldn't close directory %s: errno %d: %m", path, errno);
+			output_and_exit(LOG_ERR, msg, EXIT_FAILURE);
 		}
 
 		exit(42);
@@ -200,12 +276,15 @@ bool check_mount(const char* path) {
             if (WEXITSTATUS(status) == 42) {
                 return true;
             } else {
-                syslog(LOG_ERR, "Child process %i returned %i while checking %s!", child, WEXITSTATUS(status), path);
+                sprintf(msg, "Child process %i returned %i while checking %s!", child, WEXITSTATUS(status), path);
+		output(LOG_ERR, msg);
             }
         } else if (WIFSIGNALED(status)) {
-            syslog(LOG_ERR, "Child process %i terminated on signal %i while checking %s!", child, WTERMSIG(status), path);
+            sprintf(msg, "Child process %i terminated on signal %i while checking %s!", child, WTERMSIG(status), path);
+		output(LOG_ERR, msg);
         } else {
-            syslog(LOG_ERR, "Child process %i terminated with status %i while checking %s!", child, WEXITSTATUS(status), path);
+            sprintf(msg, "Child process %i terminated with status %i while checking %s!", child, WEXITSTATUS(status), path);
+		output(LOG_ERR, msg);
         }
 	}
 
@@ -213,13 +292,17 @@ bool check_mount(const char* path) {
 }
 
 void kill_children() {
+	char msg[255];
 	if (child > 0) {
-		syslog(LOG_INFO, "Timed out waiting for child process %i: sending SIGKILL", child);
+		sprintf(msg, "Timed out waiting for child process %i: sending SIGKILL", child);
+		output(LOG_ERR, msg);
 		int rc = kill(child, SIGKILL);
 		if (rc != 0) {
-			syslog(LOG_ERR, "Couldn't kill child process %i: errno %d: %m", child, errno);
+			sprintf(msg, "Couldn't kill child process %i: errno %d: %m", child, errno);
+			output(LOG_ERR, msg);
 		}
 	} else {
-		syslog(LOG_INFO, "Received an unexpected SIGALARM!");
+		sprintf(msg, "Received an unexpected SIGALARM!");
+		output(LOG_ERR, msg);
 	}
 }
