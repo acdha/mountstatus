@@ -76,8 +76,12 @@ struct MountStatus {
 
 fn main() {
     // TODO: command-line argument processing
+
+    let poll_interval = Duration::from_secs(60);
+
     let syslog = syslog::unix(Facility::LOG_DAEMON).unwrap();
 
+    // FIXME: make Prometheus metric pushing optional
     let prometheus_instance = hostname::get_hostname().unwrap();
 
     let mut mount_statuses = HashMap::<String, MountStatus>::new();
@@ -122,7 +126,7 @@ fn main() {
         }
 
         // Wait before checking again:
-        thread::sleep(Duration::from_secs(5));
+        thread::sleep(poll_interval);
     }
 }
 
@@ -188,7 +192,6 @@ fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &sysl
         let mount_status = check_mount(&mount_point);
 
         if mount_status.alive {
-            println!("Mount passed health-check: {}", mount_point);
             logger
                 .debug(format!("Mount passed health-check: {}", mount_point))
                 .unwrap();
