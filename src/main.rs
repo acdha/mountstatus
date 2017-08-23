@@ -30,16 +30,16 @@ extern crate lazy_static;
 
 extern crate hostname;
 
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
-use std::thread;
-use std::ptr;
-use std::str;
-use std::ffi;
-use std::slice;
 use std::collections::HashMap;
+use std::ffi;
+use std::process;
+use std::ptr;
+use std::slice;
+use std::str;
+use std::thread;
+use std::time::{Duration, Instant};
 
-use libc::{c_int, kill, statfs};
+use libc::{c_int, statfs};
 use syslog::Facility;
 use wait_timeout::ChildExt;
 
@@ -71,7 +71,7 @@ extern "C" {
 struct MountStatus {
     last_checked: Instant,
     alive: bool,
-    process_id: Option<u32>, // TODO: decide whether this should be the actual Child process so we can poll it easily?
+    check_process: Option<process::Child>,
 }
 
 fn main() {
@@ -155,19 +155,31 @@ fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &sysl
 
     for mount_point in mount_points {
         // Check whether there's a pending test:
-        match mount_statuses.get(&mount_point) {
-            Some(mount_status) => if mount_status.process_id.is_some() {
-                let pid = mount_status.process_id.unwrap();
-                let rc = unsafe { kill(pid as libc::pid_t, 0) };
+        match mount_statuses.get_mut(&mount_point) {
+            Some(mount_status) => if mount_status.check_process.is_some() {
+                let child = mount_status.check_process.as_mut().unwrap();
 
-                if rc == 0 {
-                    eprintln!(
-                        "Skipping {}: pending check (pid={}) for the last {} seconds",
+                match child.try_wait() {
+                    Ok(Some(status)) => {logger.info(format!(
+                        "Slow check for mount {} exited with {} after {} seconds",
                         mount_point,
-                        pid,
+                        status,
                         mount_status.last_checked.elapsed().as_secs()
-                    );
-                    continue;
+                    )).unwrap(); () },
+                    Ok(None) => {
+                            logger.err(format!(
+                            "Slow check for mount {} has not exited after {} seconds",
+                            mount_point,
+                            mount_status.last_checked.elapsed().as_secs()
+                        )).unwrap();
+                        continue;
+                    },
+                    Err(e) => { logger.err(format!(
+                        "Status update for hung check on mount {} returned an error after {} seconds: {}",
+                        mount_point,
+                        mount_status.last_checked.elapsed().as_secs(),
+                        e
+                    )).unwrap(); ()},
                 }
             },
             None => {}
@@ -199,12 +211,12 @@ fn check_mount(mount_point: &str) -> MountStatus {
     let mut mount_status = MountStatus {
         last_checked: Instant::now(),
         alive: false,
-        process_id: None,
+        check_process: None,
     };
 
-    let mut child = Command::new("/usr/bin/stat")
+    let mut child = process::Command::new("/usr/bin/stat")
         .arg(mount_point)
-        .stdout(Stdio::null())
+        .stdout(process::Stdio::null())
         .spawn()
         .unwrap();
 
@@ -212,15 +224,15 @@ fn check_mount(mount_point: &str) -> MountStatus {
         None => {
             // The process has not exited yet:
 
-            // We'll store a copy of the child's pid so it can be polled later,
-            // possibly much later, to see whether it's finally exited:
-            mount_status.process_id = Some(child.id());
-
             // We'll attempt to clean up by sending a SIGKILL but we won't wait
             // in case the kernel has blocked it in an uninterruptible state:
             child.kill().unwrap_or_else(|err| {
                 eprintln!("Unable to kill process {}: {:?}", child.id(), err)
             });
+
+            // We'll store a copy of the child so it can be polled later,
+            // possibly much later, to see whether it's finally exited:
+            mount_status.check_process = Some(child);
         }
         Some(exit_status) => {
             let rc = exit_status.code().unwrap();
