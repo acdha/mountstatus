@@ -82,11 +82,47 @@ fn main() {
 
     let mut mount_statuses = HashMap::<String, MountStatus>::new();
 
-    for i in 0..5 {
-        check_mounts(&mut mount_statuses, &syslog, &prometheus_instance);
+    loop {
+        check_mounts(&mut mount_statuses, &syslog);
+
+        // We calculate these values each time because a filesystem may have been
+        // mounted or unmounted since the last check:
+        let total_mounts = mount_statuses.len();
+        let dead_mounts = mount_statuses
+            .iter()
+            .map(|(_, status)| status.alive)
+            .filter(|&i| i)
+            .count();
+
+        syslog
+            .info(format!(
+                "Checked {} mounts; {} are dead",
+                total_mounts,
+                dead_mounts
+            ))
+            .unwrap();
+
+        // The Prometheus metrics are defined as floats so we need to convert;
+        // for monitoring the precision loss in general is fine and it's
+        // exceedingly unlikely to be relevant when counting the number of
+        // mountpoints:
+        TOTAL_MOUNTS.set(total_mounts as f64);
+        DEAD_MOUNTS.set(dead_mounts as f64);
+
+        match prometheus::push_metrics(
+            "mount_status_monitor",
+            labels!{"instance".to_owned() => prometheus_instance.to_owned(), },
+            "localhost:9091",
+            prometheus::gather(),
+        ) {
+            Err(e) => {
+                eprintln!("Unable to send pushgateway metrics: {}", e);
+            }
+            _ => {}
+        }
 
         // Wait before checking again:
-        thread::sleep(Duration::from_secs(i * 5));
+        thread::sleep(Duration::from_secs(5));
     }
 }
 
@@ -112,41 +148,28 @@ fn get_mount_points() -> Vec<String> {
         .collect();
 }
 
-fn check_mounts(
-    mount_statuses: &mut HashMap<String, MountStatus>,
-    logger: &syslog::Logger,
-    prometheus_instance: &String,
-) {
+fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &syslog::Logger) {
     let mount_points = get_mount_points();
-
-    // We calculate these values each time because a filesystem may have been
-    // mounted or unmounted since the last check:
-    let mut total_mounts = 0;
-    let mut dead_mounts = 0;
 
     // FIXME: we need to purge stale entries which are no longer mounted
 
     for mount_point in mount_points {
-        total_mounts += 1;
-
         // Check whether there's a pending test:
         match mount_statuses.get(&mount_point) {
-            Some(mount_status) => {
-                if mount_status.process_id.is_some() {
-                    let pid = mount_status.process_id.unwrap();
-                    let rc = unsafe { kill(pid as libc::pid_t, 0) };
+            Some(mount_status) => if mount_status.process_id.is_some() {
+                let pid = mount_status.process_id.unwrap();
+                let rc = unsafe { kill(pid as libc::pid_t, 0) };
 
-                    if rc == 0 {
-                        eprintln!(
-                            "Skipping mount {} which has had a pending check (pid={}) for the last {} seconds",
-                            mount_point,
-                            pid,
-                            mount_status.last_checked.elapsed().as_secs()
-                        );
-                        continue;
-                    }
+                if rc == 0 {
+                    eprintln!(
+                        "Skipping {}: pending check (pid={}) for the last {} seconds",
+                        mount_point,
+                        pid,
+                        mount_status.last_checked.elapsed().as_secs()
+                    );
+                    continue;
                 }
-            }
+            },
             None => {}
         }
 
@@ -163,33 +186,9 @@ fn check_mounts(
             logger
                 .err(format!("Mount failed health-check: {}", mount_point))
                 .unwrap();
-            dead_mounts += 1;
         }
 
         mount_statuses.insert(mount_point.to_owned(), mount_status);
-    }
-
-    logger
-        .info(format!(
-            "Checked {} mounts; {} are dead",
-            total_mounts,
-            dead_mounts
-        ))
-        .unwrap();
-
-    TOTAL_MOUNTS.set(total_mounts as f64);
-    DEAD_MOUNTS.set(dead_mounts as f64);
-
-    match prometheus::push_metrics(
-        "mount_status_monitor",
-        labels!{"instance".to_owned() => prometheus_instance.to_owned(), },
-        "localhost:9091",
-        prometheus::gather(),
-    ) {
-        Err(e) => {
-            eprintln!("Unable to send pushgateway metrics: {}", e);
-        }
-        _ => {}
     }
 }
 
@@ -197,24 +196,17 @@ fn check_mount(mount_point: &str) -> MountStatus {
     // FIXME: decide how we're going to handle hung mounts – return the exit
     // status so it can be polled with try_wait?
 
-    let mut cmd: Command;
     let mut mount_status = MountStatus {
         last_checked: Instant::now(),
         alive: false,
         process_id: None,
     };
 
-    if mount_point == "/net" {
-        // Simulate a hang for testing:
-        cmd = Command::new("sleep");
-        cmd.arg("10");
-    } else {
-        cmd = Command::new("/usr/bin/stat");
-        cmd.arg(mount_point);
-    }
-    cmd.stdout(Stdio::null());
-
-    let mut child = cmd.spawn().unwrap();
+    let mut child = Command::new("/usr/bin/stat")
+        .arg(mount_point)
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
 
     match child.wait_timeout(Duration::from_secs(3)).unwrap() {
         None => {
