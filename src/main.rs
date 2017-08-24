@@ -94,7 +94,7 @@ fn main() {
         let total_mounts = mount_statuses.len();
         let dead_mounts = mount_statuses
             .iter()
-            .map(|(_, status)| status.alive)
+            .map(|(_, status)| !status.alive)
             .filter(|&i| i)
             .count();
 
