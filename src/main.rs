@@ -113,16 +113,14 @@ fn main() {
         TOTAL_MOUNTS.set(total_mounts as f64);
         DEAD_MOUNTS.set(dead_mounts as f64);
 
-        match prometheus::push_metrics(
+        if let Err(e) = prometheus::push_metrics(
             "mount_status_monitor",
             labels!{"instance".to_owned() => prometheus_instance.to_owned(), },
             "localhost:9091",
             prometheus::gather(),
-        ) {
-            Err(e) => {
-                eprintln!("Unable to send pushgateway metrics: {}", e);
-            }
-            _ => {}
+        )
+        {
+            eprintln!("Unable to send pushgateway metrics: {}", e);
         }
 
         // Wait before checking again:
@@ -142,14 +140,14 @@ fn get_mount_points() -> Vec<String> {
 
     let mounts = unsafe { slice::from_raw_parts(raw_mounts_ptr, rc as usize) };
 
-    return mounts
+    mounts
         .iter()
         .map(|m| unsafe {
             ffi::CStr::from_ptr(&m.f_mntonname[0])
                 .to_string_lossy()
                 .into_owned()
         })
-        .collect();
+        .collect()
 }
 
 fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &syslog::Logger) {
@@ -159,34 +157,43 @@ fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &sysl
 
     for mount_point in mount_points {
         // Check whether there's a pending test:
-        match mount_statuses.get_mut(&mount_point) {
-            Some(mount_status) => if mount_status.check_process.is_some() {
+        if let Some(mount_status) = mount_statuses.get_mut(&mount_point) {
+            if mount_status.check_process.is_some() {
                 let child = mount_status.check_process.as_mut().unwrap();
 
                 match child.try_wait() {
-                    Ok(Some(status)) => {logger.info(format!(
-                        "Slow check for mount {} exited with {} after {} seconds",
-                        mount_point,
-                        status,
-                        mount_status.last_checked.elapsed().as_secs()
-                    )).unwrap(); () },
+                    Ok(Some(status)) => {
+                        logger
+                            .info(format!(
+                                "Slow check for mount {} exited with {} after {} seconds",
+                                mount_point,
+                                status,
+                                mount_status.last_checked.elapsed().as_secs()
+                            ))
+                            .unwrap();
+                        ()
+                    }
                     Ok(None) => {
-                            logger.err(format!(
-                            "Slow check for mount {} has not exited after {} seconds",
-                            mount_point,
-                            mount_status.last_checked.elapsed().as_secs()
-                        )).unwrap();
+                        logger
+                            .warning(format!(
+                                "Slow check for mount {} has not exited after {} seconds",
+                                mount_point,
+                                mount_status.last_checked.elapsed().as_secs()
+                            ))
+                            .unwrap();
                         continue;
-                    },
-                    Err(e) => { logger.err(format!(
-                        "Status update for hung check on mount {} returned an error after {} seconds: {}",
-                        mount_point,
-                        mount_status.last_checked.elapsed().as_secs(),
-                        e
-                    )).unwrap(); ()},
+                    }
+                    Err(e) => {
+                        logger.err(format!(
+                            "Status update for hung check on mount {} returned an error after {} seconds: {}",
+                            mount_point,
+                            mount_status.last_checked.elapsed().as_secs(),
+                            e
+                        )).unwrap();
+                        ()
+                    }
                 }
-            },
-            None => {}
+            }
         }
 
         let mount_status = check_mount(&mount_point);
@@ -246,5 +253,5 @@ fn check_mount(mount_point: &str) -> MountStatus {
         }
     };
 
-    return mount_status;
+    mount_status
 }
