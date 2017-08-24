@@ -20,26 +20,24 @@
  */
 
 extern crate libc;
+extern crate hostname;
 extern crate wait_timeout;
 extern crate syslog;
+
+#[macro_use]
+extern crate cfg_if;
 
 #[macro_use]
 extern crate prometheus;
 #[macro_use]
 extern crate lazy_static;
 
-extern crate hostname;
-
 use std::collections::HashMap;
-use std::ffi;
 use std::process;
-use std::ptr;
-use std::slice;
 use std::str;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use libc::{c_int, statfs};
 use syslog::Facility;
 use wait_timeout::ChildExt;
 
@@ -55,17 +53,7 @@ lazy_static! {
     ).unwrap();
 }
 
-/*
-target_os = linux android
-target_os = macos freebsd dragonfly openbsd netbsd
-*/
-
-pub static MNT_NOWAIT: i32 = 2;
-
-extern "C" {
-    #[cfg_attr(target_os = "macos", link_name = "getmntinfo$INODE64")]
-    fn getmntinfo(mntbufp: *mut *mut statfs, flags: c_int) -> c_int;
-}
+mod get_mounts;
 
 #[derive(Debug)]
 struct MountStatus {
@@ -128,30 +116,8 @@ fn main() {
     }
 }
 
-fn get_mount_points() -> Vec<String> {
-    // FIXME: move this into a Darwin-specific module & implement the Linux version
-    let mut raw_mounts_ptr: *mut statfs = ptr::null_mut();
-
-    let rc = unsafe { getmntinfo(&mut raw_mounts_ptr, MNT_NOWAIT) };
-
-    if rc < 0 {
-        panic!("getmntinfo returned {:?}", rc);
-    }
-
-    let mounts = unsafe { slice::from_raw_parts(raw_mounts_ptr, rc as usize) };
-
-    mounts
-        .iter()
-        .map(|m| unsafe {
-            ffi::CStr::from_ptr(&m.f_mntonname[0])
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect()
-}
-
 fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &syslog::Logger) {
-    let mount_points = get_mount_points();
+    let mount_points = get_mounts::get_mount_points();
 
     // FIXME: we need to purge stale entries which are no longer mounted
 
