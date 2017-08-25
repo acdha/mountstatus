@@ -128,11 +128,13 @@ fn main() {
     }
 }
 
-
 fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &syslog::Logger) {
     let mount_points = get_mounts::get_mount_points();
 
-    // FIXME: we need to purge stale entries which are no longer mounted
+    // Remove any mount status entries which are no longer in the current list of mountpoints:
+    mount_statuses.retain(|ref k, _| {
+        mount_points.iter().position(|i| *i == **k).is_some()
+    });
 
     for mount_point in mount_points {
         // Check whether there's a pending test:
