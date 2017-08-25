@@ -71,7 +71,7 @@ fn handle_syslog_error(err: std::io::Error) -> usize {
 fn main() {
     // TODO: command-line argument processing
 
-    let poll_interval = Duration::from_secs(60);
+    let poll_interval = Duration::from_secs(60); // FIXME: make this configurable
 
     println!("mount_status_monitor checking mounts every {} seconds", poll_interval.as_secs());
 
@@ -98,6 +98,7 @@ fn main() {
             .filter(|&i| i)
             .count();
 
+        // TODO: consider making this debug or sending it to stdout?
         syslog
             .info(format!(
                 "Checked {} mounts; {} are dead",
@@ -115,6 +116,7 @@ fn main() {
 
         if let Err(e) = prometheus::push_metrics(
             "mount_status_monitor",
+            // FIXME: make pushgateway address and instance name configurable:
             labels!{"instance".to_owned() => prometheus_instance.to_owned(), },
             "localhost:9091",
             prometheus::gather(),
