@@ -62,6 +62,12 @@ struct MountStatus {
     check_process: Option<process::Child>,
 }
 
+fn handle_syslog_error(err: std::io::Error) -> usize {
+    // Convenience function allowing all of our syslog calls to use .unwrap_or_else
+    eprintln!("Syslog failed: {}", err);
+    0
+}
+
 fn main() {
     // TODO: command-line argument processing
 
@@ -98,7 +104,7 @@ fn main() {
                 total_mounts,
                 dead_mounts
             ))
-            .unwrap();
+            .unwrap_or_else(handle_syslog_error);
 
         // The Prometheus metrics are defined as floats so we need to convert;
         // for monitoring the precision loss in general is fine and it's
@@ -122,6 +128,7 @@ fn main() {
     }
 }
 
+
 fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &syslog::Logger) {
     let mount_points = get_mounts::get_mount_points();
 
@@ -142,7 +149,7 @@ fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &sysl
                                 status,
                                 mount_status.last_checked.elapsed().as_secs()
                             ))
-                            .unwrap();
+                            .unwrap_or_else(handle_syslog_error);
                         ()
                     }
                     Ok(None) => {
@@ -152,7 +159,7 @@ fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &sysl
                                 mount_point,
                                 mount_status.last_checked.elapsed().as_secs()
                             ))
-                            .unwrap();
+                            .unwrap_or_else(handle_syslog_error);
                         continue;
                     }
                     Err(e) => {
@@ -161,7 +168,7 @@ fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &sysl
                             mount_point,
                             mount_status.last_checked.elapsed().as_secs(),
                             e
-                        )).unwrap();
+                        )).unwrap_or_else(handle_syslog_error);
                         ()
                     }
                 }
@@ -173,13 +180,13 @@ fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &sysl
         if mount_status.alive {
             logger
                 .debug(format!("Mount passed health-check: {}", mount_point))
-                .unwrap();
+                .unwrap_or_else(handle_syslog_error);
         } else {
-            // * If check fails, add to fail list and syslog
-            eprintln!("Mount failed: {}", mount_point);
+            let msg = format!("Mount failed health-check: {}", mount_point);
+            eprintln!("{}", msg);
             logger
-                .err(format!("Mount failed health-check: {}", mount_point))
-                .unwrap();
+                .err(msg)
+                .unwrap_or_else(handle_syslog_error);
         }
 
         mount_statuses.insert(mount_point.to_owned(), mount_status);
