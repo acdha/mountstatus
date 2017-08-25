@@ -1,22 +1,22 @@
 /*
-    Paranoid mount monitor for most POSIX operating systems
+    Paranoid mount monitor for POSIX operating systems
 
-    The general idea is that some classes of filesystem failure require care to
-    detect because they block any process which attempts to access the
-    mountpoint, including your monitoring code. Asynchronous APIs could help
-    except that e.g. the Linux async APIs don't include calls like stat(2) and
-    we'd like to avoid leaking a kernel request structure each time the monitor
-    checks the mountpoints.
+    The general idea is that some classes of storage failure require care to
+    detect because any access to the mountpoint, including your monitoring code,
+    will block and in the case of certain kernel bugs, that may either
+    irrecoverable or until repeated TCP + NFS timeouts expire after multiple
+    days. Asynchronous APIs could help except that e.g. the Linux async APIs
+    don't include calls like stat(2).
 
     We try to avoid this situation by using an external child process with a
-    timeout so we can SIGKILL it and avoid further checks on that mountpoint
-    until it terminates.
+    timeout. If it fails to respond by the deadline, we'll send it a SIGKILL
+    and avoid further checks until the process disappears.
 
-    The major improvements of this version of the program relative to the older
-    C version are the use of persistent state to avoid having more than one
-    check pending for any given mountpoint and the ability to send metrics to a
-    Prometheus push-gateway so they will be alertable even if the local system
-    is severely degraded.
+    The major improvements of the Rust version compared to the older C version
+    are the use of persistent state to avoid having more than one check pending
+    for any given mountpoint and the ability to send metrics to a Prometheus
+    push-gateway so they will be alertable even if the local system is severely
+    degraded.
  */
 
 extern crate libc;
@@ -187,9 +187,6 @@ fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &sysl
 }
 
 fn check_mount(mount_point: &str) -> MountStatus {
-    // FIXME: decide how we're going to handle hung mounts – return the exit
-    // status so it can be polled with try_wait?
-
     let mut mount_status = MountStatus {
         last_checked: Instant::now(),
         alive: false,
@@ -204,23 +201,31 @@ fn check_mount(mount_point: &str) -> MountStatus {
 
     match child.wait_timeout(Duration::from_secs(3)).unwrap() {
         None => {
-            // The process has not exited yet:
+            /*
+                The process has not exited and we're not going to wait for a
+                potentially very long period of time for it to recover.
 
-            // We'll attempt to clean up by sending a SIGKILL but we won't wait
-            // in case the kernel has blocked it in an uninterruptible state:
+                We'll attempt to clean up the check process by killing it, which
+                is defined as sending SIGKILL on Unix:
+
+                https://doc.rust-lang.org/std/process/struct.Child.html#method.kill
+
+                The mount_status structure returned will include this child
+                process instance so future checks can perform a non-blocking
+                test to see whether it has finally exited:
+            */
+
             child.kill().unwrap_or_else(|err| {
                 eprintln!("Unable to kill process {}: {:?}", child.id(), err)
             });
 
-            // We'll store a copy of the child so it can be polled later,
-            // possibly much later, to see whether it's finally exited:
             mount_status.check_process = Some(child);
         }
         Some(exit_status) => {
             let rc = exit_status.code().unwrap();
             match rc {
                 0 => mount_status.alive = true,
-                _ => println!("Unexpected response: {:?}", rc),
+                _ => println!("Mount check failed with an unexpected return code: {:?}", rc),
             }
         }
     };
