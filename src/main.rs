@@ -67,7 +67,13 @@ fn main() {
 
     let poll_interval = Duration::from_secs(60);
 
-    let syslog = syslog::unix(Facility::LOG_DAEMON).unwrap();
+    println!("mount_status_monitor checking mounts every {} seconds", poll_interval.as_secs());
+
+    let syslog = syslog::unix(Facility::LOG_DAEMON)
+        .unwrap_or_else(|err| {
+            eprintln!("Unable to connect to syslog: {}", err);
+            std::process::exit(1);
+        });
 
     // FIXME: make Prometheus metric pushing optional
     let prometheus_instance = hostname::get_hostname().unwrap();

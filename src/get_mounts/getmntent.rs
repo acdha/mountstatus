@@ -1,11 +1,15 @@
-// FIXME: work in progress Linux support wrapping getmntext() to match the BSD getmntinfo()
+// Wrapper for the Linux getmntent() API which returns a list of mountpoints
+
+use std::mem;
+
+use std::ffi::{CStr, CString};
 
 use libc::c_char;
 use libc::c_int;
 use libc::FILE;
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug)]
 struct mntent {
     mnt_fsname: *mut c_char,
     mnt_dir: *mut c_char,
@@ -17,36 +21,57 @@ struct mntent {
 
 impl Default for mntent {
     fn default() -> Self {
-        unsafe { ::core::mem::zeroed() }
+        unsafe { mem::zeroed() }
     }
 }
 
 extern "C" {
-    fn getmntent_r(
-        fp: *mut FILE,
-        mntbuf: *mut mntent,
-        buf: *mut c_char,
-        buflen: c_int,
-    ) -> *mut mntent;
+    fn getmntent(fp: *mut FILE) -> *mut mntent;
+    fn setmntent(filename: *const c_char, _type: *const c_char) -> *mut FILE;
+    fn endmntent(fp: *mut FILE) -> c_int;
 }
 
 pub fn get_mount_points() -> Vec<String> {
-    let mut raw_mounts_ptr: *mut statfs = ptr::null_mut();
+    let mut mount_points: Vec<String> = Vec::new();
 
-    let rc = unsafe { getmntinfo(&mut raw_mounts_ptr, MNT_NOWAIT) };
+    // The Linux API is somewhat baroque: rather than exposing the kernel's view of the world
+    // you are expected to provide it with a mounts file which traditionally might have been
+    // something like /etc/mtab but should be /proc/self/mounts (n.b. /proc/mounts is just a
+    // symlink to /proc/self/mounts).
+    let mount_filename = CString::new("/proc/self/mounts").unwrap();
+    let flags = CString::new("r").unwrap();
 
-    if rc < 0 {
-        panic!("getmntinfo returned {:?}", rc);
+    let mount_file_handle = unsafe { setmntent(mount_filename.as_ptr(), flags.as_ptr()) };
+
+    if mount_file_handle.is_null() {
+        panic!(
+            "Attempting to read mounts from {:?} failed!",
+            mount_filename
+        );
     }
 
-    let mounts = unsafe { slice::from_raw_parts(raw_mounts_ptr, rc as usize) };
+    loop {
+        let mount_entry = unsafe { getmntent(mount_file_handle) };
 
-    mounts
-        .iter()
-        .map(|m| unsafe {
-            ffi::CStr::from_ptr(&m.f_mntonname[0])
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect()
+        if mount_entry.is_null() {
+            break;
+        } else {
+            let mount_point = unsafe {
+                CStr::from_ptr((*mount_entry).mnt_dir)
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            mount_points.push(mount_point);
+        }
+    }
+
+    let rc = unsafe { endmntent(mount_file_handle) };
+    if rc != 1 {
+        panic!(
+            "endmntent() is always supposed to return 1 but returned {}!",
+            rc
+        );
+    }
+
+    mount_points
 }

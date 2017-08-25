@@ -1,4 +1,4 @@
-// Wraps the BSD getmntinfo() API in a generic function to retrieve a list of mountpoints
+// Wrapper for the BSD getmntinfo() API which returns a list of mountpoints
 extern crate libc;
 
 use std::ffi;
