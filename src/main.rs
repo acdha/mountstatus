@@ -19,10 +19,11 @@
     degraded.
  */
 
-extern crate libc;
+extern crate argparse;
 extern crate hostname;
-extern crate wait_timeout;
+extern crate libc;
 extern crate syslog;
+extern crate wait_timeout;
 
 #[macro_use]
 extern crate cfg_if;
@@ -38,6 +39,7 @@ use std::str;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use argparse::{ArgumentParser, Store, StoreOption};
 use syslog::Facility;
 use wait_timeout::ChildExt;
 
@@ -69,20 +71,42 @@ fn handle_syslog_error(err: std::io::Error) -> usize {
 }
 
 fn main() {
-    // TODO: command-line argument processing
+    let mut poll_interval = 60;
+    let mut prometheus_push_gateway: Option<String> = None;
 
-    let poll_interval = Duration::from_secs(60); // FIXME: make this configurable
+    {
+        // this block limits scope of borrows by ap.refer() method
+        let mut ap = ArgumentParser::new();
+        ap.set_description(concat!(
+            "Monitor the status of mounted filesystems and report inaccessible mounts.",
+            " Dead mounts will be reported to the local syslog server and optionally",
+            " a Prometheus push-gateway service."
+        ));
 
-    println!("mount_status_monitor checking mounts every {} seconds", poll_interval.as_secs());
+        ap.refer(&mut prometheus_push_gateway).add_option(
+            &["--prometheus-push-gateway"],
+            StoreOption,
+            "Location of the Prometheus push-gateway server to send metrics to",
+        );
+        ap.refer(&mut poll_interval).add_option(
+            &["--poll-interval"],
+            Store,
+            "Number of seconds to wait before checking mounts",
+        );
+        ap.parse_args_or_exit();
+    }
 
-    let syslog = syslog::unix(Facility::LOG_DAEMON)
-        .unwrap_or_else(|err| {
-            eprintln!("Unable to connect to syslog: {}", err);
-            std::process::exit(1);
-        });
+    let poll_interval_duration = Duration::from_secs(poll_interval);
 
-    // FIXME: make Prometheus metric pushing optional
-    let prometheus_instance = hostname::get_hostname().unwrap();
+    println!(
+        "mount_status_monitor checking mounts every {} seconds",
+        poll_interval_duration.as_secs()
+    );
+
+    let syslog = syslog::unix(Facility::LOG_DAEMON).unwrap_or_else(|err| {
+        eprintln!("Unable to connect to syslog: {}", err);
+        std::process::exit(1);
+    });
 
     let mut mount_statuses = HashMap::<String, MountStatus>::new();
 
@@ -107,26 +131,29 @@ fn main() {
             ))
             .unwrap_or_else(handle_syslog_error);
 
-        // The Prometheus metrics are defined as floats so we need to convert;
-        // for monitoring the precision loss in general is fine and it's
-        // exceedingly unlikely to be relevant when counting the number of
-        // mountpoints:
-        TOTAL_MOUNTS.set(total_mounts as f64);
-        DEAD_MOUNTS.set(dead_mounts as f64);
+        if prometheus_push_gateway.is_some() {
+            let prometheus_instance = hostname::get_hostname().unwrap();
 
-        if let Err(e) = prometheus::push_metrics(
-            "mount_status_monitor",
-            // FIXME: make pushgateway address and instance name configurable:
-            labels!{"instance".to_owned() => prometheus_instance.to_owned(), },
-            "localhost:9091",
-            prometheus::gather(),
-        )
-        {
-            eprintln!("Unable to send pushgateway metrics: {}", e);
+            // The Prometheus metrics are defined as floats so we need to convert;
+            // for monitoring the precision loss in general is fine and it's
+            // exceedingly unlikely to be relevant when counting the number of
+            // mountpoints:
+            TOTAL_MOUNTS.set(total_mounts as f64);
+            DEAD_MOUNTS.set(dead_mounts as f64);
+
+            if let Err(e) = prometheus::push_metrics(
+                "mount_status_monitor",
+                labels!{"instance".to_owned() => prometheus_instance.to_owned(), },
+                prometheus_push_gateway.as_ref().unwrap(),
+                prometheus::gather(),
+            )
+            {
+                eprintln!("Unable to send pushgateway metrics: {}", e);
+            }
         }
 
         // Wait before checking again:
-        thread::sleep(poll_interval);
+        thread::sleep(poll_interval_duration);
     }
 }
 
