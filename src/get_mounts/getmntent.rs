@@ -57,7 +57,7 @@ pub fn get_mount_points() -> Vec<PathBuf> {
         let mount_entry = unsafe { getmntent(mount_file_handle) };
         if mount_entry.is_null() {
             break;
-        } 
+        }
 
         let bytes = unsafe {
             CStr::from_ptr((*mount_entry).mnt_dir).to_bytes()
