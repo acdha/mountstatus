@@ -5,7 +5,7 @@ use std::mem;
 use std::path::PathBuf;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 
 use libc::c_char;
 use libc::c_int;
