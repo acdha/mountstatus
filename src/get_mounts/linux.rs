@@ -67,7 +67,7 @@ pub fn get_mount_points() -> Vec<PathBuf> {
     }
 
     let rc = unsafe { endmntent(mount_file_handle) };
-    assert!(rc == 0, "enmntent() is always supposed to return 1 but returned {}", rc);
+    assert!(rc == 1, "endmntent() is always supposed to return 1 but returned {}", rc);
 
     mount_points
 }
