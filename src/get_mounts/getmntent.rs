@@ -2,6 +2,9 @@
 
 use std::mem;
 
+use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
 use std::ffi::{CStr, CString};
 
 use libc::c_char;
@@ -31,22 +34,22 @@ extern "C" {
     fn endmntent(fp: *mut FILE) -> c_int;
 }
 
-pub fn get_mount_points() -> Vec<String> {
-    let mut mount_points: Vec<String> = Vec::new();
+pub fn get_mount_points() -> Vec<PathBuf> {
+    let mut mount_points: Vec<PathBuf> = Vec::new();
 
     // The Linux API is somewhat baroque: rather than exposing the kernel's view of the world
     // you are expected to provide it with a mounts file which traditionally might have been
     // something like /etc/mtab but should be /proc/self/mounts (n.b. /proc/mounts is just a
     // symlink to /proc/self/mounts).
-    let mount_filename = CString::new("/proc/self/mounts").unwrap();
-    let flags = CString::new("r").unwrap();
+    let mount_filename = "/proc/self/mounts\0";
+    let flags = "r\0";
 
-    let mount_file_handle = unsafe { setmntent(mount_filename.as_ptr(), flags.as_ptr()) };
+    let mount_file_handle = unsafe { setmntent(mount_filename.as_ptr() as *const _, flags.as_ptr() as *const _) };
 
     if mount_file_handle.is_null() {
         panic!(
-            "Attempting to read mounts from {:?} failed!",
-            mount_filename
+            "Attempting to read mounts from {} failed!",
+            &mount_filename[..mount_filename.len() - 1]
         );
     }
 
@@ -56,11 +59,10 @@ pub fn get_mount_points() -> Vec<String> {
         if mount_entry.is_null() {
             break;
         } else {
-            let mount_point = unsafe {
-                CStr::from_ptr((*mount_entry).mnt_dir)
-                    .to_string_lossy()
-                    .into_owned()
+            let bytes = unsafe {
+                CStr::from_ptr((*mount_entry).mnt_dir).to_bytes()
             };
+            let mount_point = PathBuf::from(OsStr::from_bytes(bytes).to_owned());
             mount_points.push(mount_point);
         }
     }

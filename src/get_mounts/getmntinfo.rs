@@ -1,10 +1,11 @@
 // Wrapper for the BSD getmntinfo() API which returns a list of mountpoints
 extern crate libc;
 
-use std::ffi;
 use std::ptr;
 use std::slice;
-use std::str;
+use std::path::PathBuf;
+use std::ffi::{CStr, OsStr};
+use std::os::unix::ffi::OsStrExt;
 
 use libc::{c_int, statfs};
 
@@ -15,24 +16,21 @@ extern "C" {
     fn getmntinfo(mntbufp: *mut *mut statfs, flags: c_int) -> c_int;
 }
 
-pub fn get_mount_points() -> Vec<String> {
+pub fn get_mount_points() -> Vec<PathBuf> {
     // FIXME: move this into a Darwin-specific module & implement the Linux version
     let mut raw_mounts_ptr: *mut statfs = ptr::null_mut();
 
     let rc = unsafe { getmntinfo(&mut raw_mounts_ptr, MNT_NOWAIT) };
-
-    if rc < 0 {
-        panic!("getmntinfo returned {:?}", rc);
-    }
+    assert!(rc >= 0, "getmntinfo returned {:?}");
+    assert!(!raw_mounts_ptr.is_null(), "getmntinfo failed to update list of mounts");
 
     let mounts = unsafe { slice::from_raw_parts(raw_mounts_ptr, rc as usize) };
 
     mounts
         .iter()
         .map(|m| unsafe {
-            ffi::CStr::from_ptr(&m.f_mntonname[0])
-                .to_string_lossy()
-                .into_owned()
+            let bytes = CStr::from_ptr(&m.f_mntonname[0]).to_bytes();
+            PathBuf::from(OsStr::from_bytes(bytes).to_owned())
         })
         .collect()
 }

@@ -38,6 +38,7 @@ use std::process;
 use std::str;
 use std::thread;
 use std::time::{Duration, Instant};
+use std::path::{Path, PathBuf};
 
 use argparse::{ArgumentParser, Store, StoreOption};
 use syslog::Facility;
@@ -108,7 +109,7 @@ fn main() {
         std::process::exit(1);
     });
 
-    let mut mount_statuses = HashMap::<String, MountStatus>::new();
+    let mut mount_statuses = HashMap::<PathBuf, MountStatus>::new();
 
     loop {
         check_mounts(&mut mount_statuses, &syslog);
@@ -157,7 +158,7 @@ fn main() {
     }
 }
 
-fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &syslog::Logger) {
+fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &syslog::Logger) {
     let mount_points = get_mounts::get_mount_points();
 
     // Remove any mount status entries which are no longer in the current list of mountpoints:
@@ -176,7 +177,7 @@ fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &sysl
                         logger
                             .info(format!(
                                 "Slow check for mount {} exited with {} after {} seconds",
-                                mount_point,
+                                mount_point.display(),
                                 status,
                                 mount_status.last_checked.elapsed().as_secs()
                             ))
@@ -187,7 +188,7 @@ fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &sysl
                         logger
                             .warning(format!(
                                 "Slow check for mount {} has not exited after {} seconds",
-                                mount_point,
+                                mount_point.display(),
                                 mount_status.last_checked.elapsed().as_secs()
                             ))
                             .unwrap_or_else(handle_syslog_error);
@@ -196,7 +197,7 @@ fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &sysl
                     Err(e) => {
                         logger.err(format!(
                             "Status update for hung check on mount {} returned an error after {} seconds: {}",
-                            mount_point,
+                            mount_point.display(),
                             mount_status.last_checked.elapsed().as_secs(),
                             e
                         )).unwrap_or_else(handle_syslog_error);
@@ -210,10 +211,10 @@ fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &sysl
 
         if mount_status.alive {
             logger
-                .debug(format!("Mount passed health-check: {}", mount_point))
+                .debug(format!("Mount passed health-check: {}", mount_point.display()))
                 .unwrap_or_else(handle_syslog_error);
         } else {
-            let msg = format!("Mount failed health-check: {}", mount_point);
+            let msg = format!("Mount failed health-check: {}", mount_point.display());
             eprintln!("{}", msg);
             logger
                 .err(msg)
@@ -224,7 +225,7 @@ fn check_mounts(mount_statuses: &mut HashMap<String, MountStatus>, logger: &sysl
     }
 }
 
-fn check_mount(mount_point: &str) -> MountStatus {
+fn check_mount(mount_point: &Path) -> MountStatus {
     let mut mount_status = MountStatus {
         last_checked: Instant::now(),
         alive: false,
@@ -253,9 +254,9 @@ fn check_mount(mount_point: &str) -> MountStatus {
                 test to see whether it has finally exited:
             */
 
-            child.kill().unwrap_or_else(|err| {
+            if let Err(err) = child.kill() {
                 eprintln!("Unable to kill process {}: {:?}", child.id(), err)
-            });
+            };
 
             mount_status.check_process = Some(child);
         }
@@ -263,7 +264,7 @@ fn check_mount(mount_point: &str) -> MountStatus {
             let rc = exit_status.code().unwrap();
             match rc {
                 0 => mount_status.alive = true,
-                _ => println!("Mount check failed with an unexpected return code: {:?}", rc),
+                _ => eprintln!("Mount check failed with an unexpected return code: {:?}", rc),
             }
         }
     };
