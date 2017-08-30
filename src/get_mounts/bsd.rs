@@ -1,6 +1,4 @@
 // Wrapper for the BSD getmntinfo() API which returns a list of mountpoints
-extern crate libc;
-
 use std::ptr;
 use std::slice;
 use std::path::PathBuf;
