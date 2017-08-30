@@ -26,9 +26,6 @@ extern crate syslog;
 extern crate wait_timeout;
 
 #[macro_use]
-extern crate cfg_if;
-
-#[macro_use]
 extern crate prometheus;
 #[macro_use]
 extern crate lazy_static;
