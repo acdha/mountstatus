@@ -55,25 +55,19 @@ pub fn get_mount_points() -> Vec<PathBuf> {
 
     loop {
         let mount_entry = unsafe { getmntent(mount_file_handle) };
-
         if mount_entry.is_null() {
             break;
-        } else {
-            let bytes = unsafe {
-                CStr::from_ptr((*mount_entry).mnt_dir).to_bytes()
-            };
-            let mount_point = PathBuf::from(OsStr::from_bytes(bytes).to_owned());
-            mount_points.push(mount_point);
-        }
+        } 
+
+        let bytes = unsafe {
+            CStr::from_ptr((*mount_entry).mnt_dir).to_bytes()
+        };
+        let mount_point = PathBuf::from(OsStr::from_bytes(bytes).to_owned());
+        mount_points.push(mount_point);
     }
 
     let rc = unsafe { endmntent(mount_file_handle) };
-    if rc != 1 {
-        panic!(
-            "endmntent() is always supposed to return 1 but returned {}!",
-            rc
-        );
-    }
+    assert!(rc == 0, "enmntent() is always supposed to return 1 but returned {}", rc);
 
     mount_points
 }
