@@ -5,7 +5,7 @@ use std::mem;
 use std::path::PathBuf;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 
 use libc::c_char;
 use libc::c_int;
@@ -67,7 +67,7 @@ pub fn get_mount_points() -> Vec<PathBuf> {
     }
 
     let rc = unsafe { endmntent(mount_file_handle) };
-    assert!(rc == 0, "enmntent() is always supposed to return 1 but returned {}", rc);
+    assert!(rc == 1, "endmntent() is always supposed to return 1 but returned {}", rc);
 
     mount_points
 }
