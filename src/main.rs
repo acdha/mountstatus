@@ -2,21 +2,23 @@
     Paranoid mount monitor for POSIX operating systems
 
     The general idea is that some classes of storage failure require care to
-    detect because any access to the mountpoint, including your monitoring code,
-    will block and in the case of certain kernel bugs, that may either
-    irrecoverable or until repeated TCP + NFS timeouts expire after multiple
-    days. Asynchronous APIs could help except that e.g. the Linux async APIs
-    don't include calls like stat(2).
+    detect because any access to the mountpoint including your monitoring check
+    will block and in the case of certain kernel bugs that may be completely
+    irrecoverable or will require a considerable delay – often days by default –
+    to exhaust repeated TCP and NFS timeouts.
 
-    We try to avoid this situation by using an external child process with a
-    timeout. If it fails to respond by the deadline, we'll send it a SIGKILL
-    and avoid further checks until the process disappears.
+    This can't be solved easily by using asynchronous I/O APIs because key
+    platforms like Linux don't implement an async stat(2) equivalent. This
+    program uses the broadly-portable approach of launch an external child
+    process asynchronously with a timeout. If it fails to respond by the
+    deadline, we'll send it a SIGKILL and avoid further checks until the process
+    disappears to avoid accumulating blocked check processes.
 
-    The major improvements of the Rust version compared to the older C version
-    are the use of persistent state to avoid having more than one check pending
-    for any given mountpoint and the ability to send metrics to a Prometheus
-    push-gateway so they will be alertable even if the local system is severely
-    degraded.
+    The major improvements of the Rust version compared to the original C
+    version are the use of persistent state to avoid having more than one check
+    pending for any given mountpoint and the ability to send metrics to a
+    Prometheus push-gateway so they will be alertable even if the local system
+    is severely degraded.
  */
 
 extern crate argparse;

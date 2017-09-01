@@ -1,74 +1,73 @@
-Background
-==========
+# Background
 
-Our environment is designed around a NAS model with a few very large servers
-providing terabytes of storage to several hundred machines using NFS and
-cfengine to synchronize our filesystem configuration. This greatly simplifies
-our infrastructure by giving our users a single, consistent filesystem view no
-matter which machine they're using, avoids the need for us to manage large
-quantities of local storage and has allowed us to treat servers and
-workstations as interchangeable parts (automated installs mean a failed system
-can be replaced in as little as 5 minutes).
+Operating systems have traditionally assumed that storage components are either
+working or have failed and must be replaced. Most code has been developed using
+the synchronous I/O model where operations wait until they either receive a
+successful result or an error. This model is not suitable for complex storage
+environments involving many devices or, especially, networks where failures are
+more common and might be transient. Additionally, Linux, FreeBSD and macOS have
+all had serious NFS client bugs and design flaws which significantly amplified
+the damage from even a momentary failure or overload.
 
-As you'd expect, this doesn't always work so well as NFS was designed to
-handle failures smoothly: something goes wrong client simply hangs until the
-server starts responding again. Unfortunately, most desktop operating systems
-assume that networks and servers are perfectly reliable, and handle problems
-particularly poorly by freezing because key parts of the UI use config files
-in a user's home directory and so the GUI freezes along with everything else.
+Unfortunately many programs have non-obvious triggers which cause them to scan
+all mounted filesystems, causing them to hang as soon as any mounted filesystem
+stops responding. In the case of NFS home directories the user experience is
+especially bad because most desktop environments will completely hang trying to
+access configuration files from the user's home directory, making the system
+unusable.
 
-OS X, FreeBSD and Linux have all had serious NFS client bugs which
-significantly amplified the damage from even a momentary failure or overload.
+Finally, very few applications have the complicated code required to report when a
+storage request has blocked for a long period of time which makes it hard for a
+system administrator to proactively correct the problem. In some cases a reboot
+may be required but in many cases the fallout from a temporary outage can be
+significantly reduced by using `umount -f` or, in certain situations on Linux,
+`umount -f -l`, and remounting the filesystem so any new process will be
+completely unaffected.
 
-What makes this worse is that most of these failures are never logged in any
-form, making it hard for system administrators to take any sort of prompt
-action.
+## What `mount_status_monitor` does
 
-What it does
-============
+`mount_status_monitor` provides the missing notification solution for imperfect
+storage. It's a simple daemon which periodically checks every mounted filesystem
+using an asynchronous check with a timeout so it can report soft failures caused
+by unresponsive storage as well as hard errors.
 
-MountStatusMonitor provides the missing notification piece and is a handy tool
-for anyone who uses imperfect storage. It's a simple daemon which periodically
-checks every mounted filesystem for failures and, unlike most other monitoring
-tools, MountStatusMonitor robustly handles the various failure modes which
-result in a hang because it works by fork()ing a child process which attempts
-to list the contents of the mountpoint and will trigger an error if the child 
-never returns.
+After each run is complete it will send a message to syslog:
 
-Normally it syslogs a message like this after running:
+    Checked 5 mounts; 0 are dead
 
-    MountStatusMonitor[2659]: Checked 42 mounts in 0 seconds
+Optionally, the [Prometheus push-gateway](https://prometheus.io/docs/instrumenting/pushing/)
+will receive two metrics (`total_mountpoints` and `dead_mountpoints`) with the
+same information for alerting and correlation purposes.
 
-When something fails it logs a summary message like this:
+When a mount test fails the mountpoint will be sent to syslog and stderr:
 
-    MountStatusMonitor[21900]: Checked 37 mounts in 60 seconds: 1 dead
+    Mount failed health-check: /Volumes/TestSSHFS
 
-Other information about the failed mount depends on the type of failure. Many
-NFS failures will simply cause a process to hang when it accesses the mount
-and so MountStatusMonitor works by forking a worker process which performs the
-actual check, allowing the main process to record an error if the check takes
-too long:
+There are several ways to simulate failures for testing. The easiest is to use a
+user-mode filesystem such as sshfs, s3fs, etc. and use `kill -STOP` to freeze
+the FUSE process long enough to trigger the unresponsive mount failure. For more
+involved testing or if you are also evaluating system tuning options you can use
+iptables to simulate packet loss or hard failure of an NFS server.
 
-    MountStatusMonitor[21900]: Timed out waiting for child process 30686: sending SIGKILL
+## Installation
 
-The worker process uses setuid to run as the owner of the mountpoint but it's
-still possible to encounter permissions errors and those will be logged like
-this:
+Compiling the code requires a working [Rust](https://www.rust-lang.org) toolchain:
 
-    MountStatusMonitor[18038]: Couldn't check mountpoint /example: mode 4000 does not allow access
+    cargo build --release
 
+### Running the monitor
 
-Installation
-============
+For testing you can simply run `mount_status_monitor` directly and watch the
+output. Note that while the process can run without elevated permissions it is
+likely that this will generate error messages due to mountpoints which are
+inaccessible.
 
-The simple process is "make install". The binary needs to run as root -
-installation could be as simple as installing it in /usr/local/sbin and adding
-a simple cron @reboot entry to start it automatically.
+In normal operation `mount_status_monitor` relies a supervisor such as Upstart,
+systemd, or launchd to keep it running. See the `upstart` and `systemd`
+directories for provided config files.
 
-Future Directions
-=================
+## Future Directions
 
-A long term experiment is having MountStatusMonitor actually attempt to do a
-umount -f (or -l on Linux) to reduce the number of applications which hit a
-dead mountpoint. This is somewhat risky and I haven't released any code
-publicly. If you have any suggestions, email chris@improbable.org.
+A long term experiment is having `mount_status_monitor` actually attempt to run
+`umount -f` (or `umount -f -l` on Linux) and remount the filesystem to reduce
+the number of applications which hit a dead mountpoint. This may not be appropriate for all users and would require testing to avoid making the problem worse.
