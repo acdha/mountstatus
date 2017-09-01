@@ -129,7 +129,7 @@ fn main() {
             ))
             .unwrap_or_else(handle_syslog_error);
 
-        if prometheus_push_gateway.is_some() {
+        if let Some(ref gateway_address) = prometheus_push_gateway {
             let prometheus_instance = hostname::get_hostname().unwrap();
 
             // The Prometheus metrics are defined as floats so we need to convert;
@@ -142,11 +142,10 @@ fn main() {
             if let Err(e) = prometheus::push_metrics(
                 "mount_status_monitor",
                 labels!{"instance".to_owned() => prometheus_instance.to_owned(), },
-                prometheus_push_gateway.as_ref().unwrap(),
+                gateway_address,
                 prometheus::gather(),
-            )
-            {
-                eprintln!("Unable to send pushgateway metrics: {}", e);
+            ) {
+                eprintln!("Unable to send pushgateway metrics to {}: {}", gateway_address, e);
             }
         }
 
