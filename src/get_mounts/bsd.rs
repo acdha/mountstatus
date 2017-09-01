@@ -15,7 +15,6 @@ extern "C" {
 }
 
 pub fn get_mount_points() -> Vec<PathBuf> {
-    // FIXME: move this into a Darwin-specific module & implement the Linux version
     let mut raw_mounts_ptr: *mut statfs = ptr::null_mut();
 
     let rc = unsafe { getmntinfo(&mut raw_mounts_ptr, MNT_NOWAIT) };
