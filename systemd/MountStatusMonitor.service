@@ -1,8 +1,0 @@
-[Unit]
-Description=Mount Status Monitor
-After=syslog.target
-
-[Service]
-Type=forking
-ExecStart=/usr/sbin/MountStatusMonitor
-Restart=on-failure
