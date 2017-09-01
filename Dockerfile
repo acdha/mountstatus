@@ -21,5 +21,4 @@ RUN echo "*.* /dev/console" > /etc/syslog.conf
 
 COPY --from=builder /mountstatus/target/debug/mount_status_monitor /usr/local/sbin/
 
-ENTRYPOINT service inetutils-syslogd start && timeout 10 mount_status_monitor
-
+ENTRYPOINT service inetutils-syslogd start && timeout 8 mount_status_monitor --poll-interval=5

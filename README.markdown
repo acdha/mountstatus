@@ -55,6 +55,10 @@ Compiling the code requires a working [Rust](https://www.rust-lang.org) toolchai
 
     cargo build --release
 
+A Docker image is provided for testing basic functionality:
+
+    docker build -t mountstatus . && docker run -it --rm mountstatus
+
 ### Running the monitor
 
 For testing you can simply run `mount_status_monitor` directly and watch the
