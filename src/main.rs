@@ -160,7 +160,10 @@ fn main() {
 }
 
 fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &syslog::Logger) {
-    let mount_points = get_mounts::get_mount_points();
+    let mount_points = get_mounts::get_mount_points().unwrap_or_else(|err| {
+        eprintln!("Failed to retrieve a list of mount-points: {:?}", err);
+        std::process::exit(2);
+    });
 
     // Remove any mount status entries which are no longer in the current list of mountpoints:
     mount_statuses.retain(|ref k, _| {

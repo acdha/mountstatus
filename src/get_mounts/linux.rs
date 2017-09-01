@@ -1,11 +1,11 @@
 // Wrapper for the Linux getmntent() API which returns a list of mountpoints
 
-use std::mem;
-
-use std::path::PathBuf;
-use std::ffi::OsStr;
-use std::os::unix::ffi::OsStrExt;
 use std::ffi::CStr;
+use std::ffi::OsStr;
+use std::io::Result;
+use std::mem;
+use std::os::unix::ffi::OsStrExt;
+use std::path::PathBuf;
 
 use libc::c_char;
 use libc::c_int;
@@ -34,7 +34,7 @@ extern "C" {
     fn endmntent(fp: *mut FILE) -> c_int;
 }
 
-pub fn get_mount_points() -> Vec<PathBuf> {
+pub fn get_mount_points() -> Result<Vec<PathBuf>> {
     let mut mount_points: Vec<PathBuf> = Vec::new();
 
     // The Linux API is somewhat baroque: rather than exposing the kernel's view of the world
@@ -44,14 +44,18 @@ pub fn get_mount_points() -> Vec<PathBuf> {
     let mount_filename = "/proc/self/mounts\0";
     let flags = "r\0";
 
-    let mount_file_handle = unsafe { setmntent(mount_filename.as_ptr() as *const _, flags.as_ptr() as *const _) };
+    let mount_file_handle = unsafe {
+        setmntent(
+            mount_filename.as_ptr() as *const _,
+            flags.as_ptr() as *const _,
+        )
+    };
 
-    if mount_file_handle.is_null() {
-        panic!(
-            "Attempting to read mounts from {} failed!",
-            &mount_filename[..mount_filename.len() - 1]
-        );
-    }
+    assert!(
+        !mount_file_handle.is_null(),
+        "Attempting to read mounts from {} failed!",
+        &mount_filename[..mount_filename.len() - 1]
+    );
 
     loop {
         let mount_entry = unsafe { getmntent(mount_file_handle) };
@@ -59,15 +63,19 @@ pub fn get_mount_points() -> Vec<PathBuf> {
             break;
         }
 
-        let bytes = unsafe {
-            CStr::from_ptr((*mount_entry).mnt_dir).to_bytes()
-        };
+        let bytes = unsafe { CStr::from_ptr((*mount_entry).mnt_dir).to_bytes() };
         let mount_point = PathBuf::from(OsStr::from_bytes(bytes).to_owned());
         mount_points.push(mount_point);
     }
 
     let rc = unsafe { endmntent(mount_file_handle) };
-    assert!(rc == 1, "endmntent() is always supposed to return 1 but returned {}", rc);
+    // The documentation is strong enough about this that there's no plausible
+    // way to attempt handling endmntent() failures:
+    assert!(
+        rc == 1,
+        "endmntent() is always supposed to return 1 but returned {}",
+        rc
+    );
 
-    mount_points
+    Ok(mount_points)
 }
