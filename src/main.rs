@@ -116,8 +116,7 @@ fn main() {
         let total_mounts = mount_statuses.len();
         let dead_mounts = mount_statuses
             .iter()
-            .map(|(_, status)| !status.alive)
-            .filter(|&i| i)
+            .filter(|&(_, status)| !status.alive)
             .count();
 
         // TODO: consider making this debug or sending it to stdout?
