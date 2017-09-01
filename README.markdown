@@ -74,4 +74,16 @@ directories for provided config files.
 
 A long term experiment is having `mount_status_monitor` actually attempt to run
 `umount -f` (or `umount -f -l` on Linux) and remount the filesystem to reduce
-the number of applications which hit a dead mountpoint. This may not be appropriate for all users and would require testing to avoid making the problem worse.
+the number of applications which hit a dead mountpoint. This may not be
+appropriate for all users and would require testing to avoid making the problem
+worse.
+
+## Contributors & Acknowledgements
+
+Thanks to the following Rust community members who volunteered to review &
+improve this code, listed in alphabetical order:
+
+* Pascal Hertleif (@killercup)
+* Paul Daniel Faria (@Nashenas88)
+* Rahul Sharma (@creativcoder)
+* Zachary Dremann (@Dr-Emann)
