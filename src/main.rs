@@ -234,8 +234,9 @@ fn check_mount(mount_point: &Path) -> MountStatus {
         .spawn()
         .unwrap();
 
-    match child.wait_timeout(Duration::from_secs(3)).unwrap() {
-        None => {
+    // See https://github.com/rust-lang/rust/issues/18166 for why we can't make this a static value:
+    match child.wait_timeout(Duration::from_secs(3)) {
+        Ok(None) => {
             /*
                 The process has not exited and we're not going to wait for a
                 potentially very long period of time for it to recover.
@@ -256,12 +257,18 @@ fn check_mount(mount_point: &Path) -> MountStatus {
 
             mount_status.check_process = Some(child);
         }
-        Some(exit_status) => {
-            let rc = exit_status.code().unwrap();
+        Ok(Some(exit_status)) => {
+            let rc = exit_status.code();
             match rc {
-                0 => mount_status.alive = true,
-                _ => eprintln!("Mount check failed with an unexpected return code: {:?}", rc),
+                Some(0) => mount_status.alive = true,
+                Some(rc) => eprintln!("Mount check failed with an unexpected return code: {:?}", rc),
+                None => {
+                    eprintln!("Child did not have an exit status; unix signal = {:?}", exit_status.unix_signal())
+                }
             }
+        }
+        Err(e) => {
+            eprintln!("Error waiting for child process: {:?}", e);
         }
     };
 
