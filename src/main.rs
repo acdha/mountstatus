@@ -28,9 +28,9 @@ extern crate syslog;
 extern crate wait_timeout;
 
 #[macro_use]
-extern crate prometheus;
-#[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate prometheus;
 
 use std::collections::HashMap;
 use std::process;
@@ -146,7 +146,11 @@ fn main() {
                 gateway_address,
                 prometheus::gather(),
             ) {
-                eprintln!("Unable to send pushgateway metrics to {}: {}", gateway_address, e);
+                eprintln!(
+                    "Unable to send pushgateway metrics to {}: {}",
+                    gateway_address,
+                    e
+                );
             }
         }
 
@@ -192,12 +196,14 @@ fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &sys
                         continue;
                     }
                     Err(e) => {
-                        logger.err(format!(
-                            "Status update for hung check on mount {} returned an error after {} seconds: {}",
-                            mount_point.display(),
-                            mount_status.last_checked.elapsed().as_secs(),
-                            e
-                        )).unwrap_or_else(handle_syslog_error);
+                        logger
+                            .err(format!(
+                                "Stalled check on mount {} returned an error after {} seconds: {}",
+                                mount_point.display(),
+                                mount_status.last_checked.elapsed().as_secs(),
+                                e
+                            ))
+                            .unwrap_or_else(handle_syslog_error);
                         ()
                     }
                 }
@@ -208,14 +214,15 @@ fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &sys
 
         if mount_status.alive {
             logger
-                .debug(format!("Mount passed health-check: {}", mount_point.display()))
+                .debug(format!(
+                    "Mount passed health-check: {}",
+                    mount_point.display()
+                ))
                 .unwrap_or_else(handle_syslog_error);
         } else {
             let msg = format!("Mount failed health-check: {}", mount_point.display());
             eprintln!("{}", msg);
-            logger
-                .err(msg)
-                .unwrap_or_else(handle_syslog_error);
+            logger.err(msg).unwrap_or_else(handle_syslog_error);
         }
 
         mount_statuses.insert(mount_point.to_owned(), mount_status);
@@ -262,10 +269,14 @@ fn check_mount(mount_point: &Path) -> MountStatus {
             let rc = exit_status.code();
             match rc {
                 Some(0) => mount_status.alive = true,
-                Some(rc) => eprintln!("Mount check failed with an unexpected return code: {:?}", rc),
-                None => {
-                    eprintln!("Child did not have an exit status; unix signal = {:?}", exit_status.unix_signal())
-                }
+                Some(rc) => eprintln!(
+                    "Mount check failed with an unexpected return code: {:?}",
+                    rc
+                ),
+                None => eprintln!(
+                    "Child did not have an exit status; unix signal = {:?}",
+                    exit_status.unix_signal()
+                ),
             }
         }
         Err(e) => {
