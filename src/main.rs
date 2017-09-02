@@ -22,13 +22,18 @@
  */
 
 extern crate argparse;
-extern crate hostname;
 extern crate libc;
 extern crate syslog;
 extern crate wait_timeout;
 
+#[cfg(feature = "with_server")]
+extern crate hostname;
+
+#[cfg(feature = "with_server")]
 #[macro_use]
 extern crate lazy_static;
+
+#[cfg(feature = "with_server")]
 #[macro_use]
 extern crate prometheus;
 
@@ -42,18 +47,6 @@ use std::path::{Path, PathBuf};
 use argparse::{ArgumentParser, Store, StoreOption};
 use syslog::Facility;
 use wait_timeout::ChildExt;
-
-lazy_static! {
-    static ref TOTAL_MOUNTS: prometheus::Gauge = register_gauge!(
-        "total_mountpoints",
-        "Total number of mountpoints"
-    ).unwrap();
-
-    static ref DEAD_MOUNTS: prometheus::Gauge = register_gauge!(
-        "dead_mountpoints",
-        "Number of unresponsive mountpoints"
-    ).unwrap();
-}
 
 mod get_mounts;
 
@@ -83,11 +76,14 @@ fn main() {
             " a Prometheus push-gateway service."
         ));
 
-        ap.refer(&mut prometheus_push_gateway).add_option(
-            &["--prometheus-push-gateway"],
-            StoreOption,
-            "Location of the Prometheus push-gateway server to send metrics to",
-        );
+        if cfg!(feature = "with_server") {
+            ap.refer(&mut prometheus_push_gateway).add_option(
+                &["--prometheus-push-gateway"],
+                StoreOption,
+                "Location of the Prometheus push-gateway server to send metrics to",
+            );
+        }
+
         ap.refer(&mut poll_interval).add_option(
             &["--poll-interval"],
             Store,
@@ -131,32 +127,53 @@ fn main() {
             .unwrap_or_else(handle_syslog_error);
 
         if let Some(ref gateway_address) = prometheus_push_gateway {
-            let prometheus_instance = hostname::get_hostname().unwrap();
-
-            // The Prometheus metrics are defined as floats so we need to convert;
-            // for monitoring the precision loss in general is fine and it's
-            // exceedingly unlikely to be relevant when counting the number of
-            // mountpoints:
-            TOTAL_MOUNTS.set(total_mounts as f64);
-            DEAD_MOUNTS.set(dead_mounts as f64);
-
-            if let Err(e) = prometheus::push_metrics(
-                "mount_status_monitor",
-                labels!{"instance".to_owned() => prometheus_instance.to_owned(), },
-                gateway_address,
-                prometheus::gather(),
-            ) {
-                eprintln!(
-                    "Unable to send pushgateway metrics to {}: {}",
-                    gateway_address,
-                    e
-                );
+            if let Err(e) = push_to_server(gateway_address, dead_mounts, total_mounts) {
+                eprintln!("{}", e);
             }
         }
 
         // Wait before checking again:
         thread::sleep(poll_interval_duration);
     }
+}
+
+#[cfg(not(feature = "with_server"))]
+fn push_to_server(_: &str, _: usize, _: usize) -> Result<(), &'static str> {
+    Ok(())
+}
+
+#[cfg(feature = "with_server")]
+fn push_to_server(gateway: &str, dead_mounts: usize, total_mounts: usize) -> prometheus::Result<()> {
+    lazy_static! {
+        static ref TOTAL_MOUNTS: prometheus::Gauge = register_gauge!(
+            "total_mountpoints",
+            "Total number of mountpoints"
+        ).unwrap();
+
+        static ref DEAD_MOUNTS: prometheus::Gauge = register_gauge!(
+            "dead_mountpoints",
+            "Number of unresponsive mountpoints"
+        ).unwrap();
+    }
+
+    let prometheus_instance = match hostname::get_hostname() {
+        Some(hostname) => hostname,
+        None => return Err(prometheus::Error::Msg("Unable to retrieve hostname".into())),
+    };
+
+    // The Prometheus metrics are defined as floats so we need to convert;
+    // for monitoring the precision loss in general is fine and it's
+    // exceedingly unlikely to be relevant when counting the number of
+    // mountpoints:
+    TOTAL_MOUNTS.set(total_mounts as f64);
+    DEAD_MOUNTS.set(dead_mounts as f64);
+
+    prometheus::push_metrics(
+        "mount_status_monitor",
+        labels!{"instance".to_owned() => prometheus_instance.to_owned(), },
+        gateway,
+        prometheus::gather(),
+    )
 }
 
 fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &syslog::Logger) {

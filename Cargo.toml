@@ -7,10 +7,15 @@ authors = [ "Chris Adams <chris@improbable.org>" ]
 wait-timeout = "0.1.5"
 libc = "0.2.29"
 syslog = "3.3.0"
-lazy_static = "0.2.1"
-hostname = "^0.1"
+lazy_static = { version="0.2.1", optional=true }
+hostname = { version="^0.1", optional=true }
 argparse = "*"
 
 [dependencies.prometheus]
 version = "0.3"
 features = ["push"]
+optional = true
+
+[features]
+default = ["with_server"]
+with_server = ["lazy_static", "prometheus", "hostname"]
