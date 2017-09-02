@@ -35,7 +35,7 @@ pub fn get_mount_points() -> Result<Vec<PathBuf>> {
 
     assert!(
         !raw_mounts_ptr.is_null(),
-        "getmntinfo() returned a null point for the list of mountpoints!"
+        "getmntinfo() returned a null pointer to the list of mountpoints!"
     );
 
     let raw_mounts = unsafe { slice::from_raw_parts(raw_mounts_ptr, rc as usize) };
