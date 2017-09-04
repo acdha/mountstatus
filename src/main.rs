@@ -26,6 +26,9 @@ extern crate libc;
 extern crate syslog;
 extern crate wait_timeout;
 
+#[macro_use]
+extern crate error_chain;
+
 #[cfg(feature = "with_server")]
 extern crate hostname;
 
@@ -48,14 +51,10 @@ use argparse::{ArgumentParser, Store, StoreOption};
 use syslog::Facility;
 use wait_timeout::ChildExt;
 
+mod errors;
 mod get_mounts;
 
-#[derive(Debug)]
-struct MountStatus {
-    last_checked: Instant,
-    alive: bool,
-    check_process: Option<process::Child>,
-}
+use errors::*;
 
 fn handle_syslog_error(err: std::io::Error) -> usize {
     // Convenience function allowing all of our syslog calls to use .unwrap_or_else
@@ -63,7 +62,30 @@ fn handle_syslog_error(err: std::io::Error) -> usize {
     0
 }
 
-fn main() {
+#[derive(Debug)]
+enum MountStatus {
+    Alive,
+    CheckFailed(i32),
+    CheckSignaled(i32),
+    CheckRunning {
+        process: process::Child,
+        start_time: Instant,
+    }
+}
+
+impl MountStatus {
+    fn success(&self) -> bool {
+        if let MountStatus::Alive = *self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
+quick_main!{ real_main }
+
+fn real_main() -> Result<()> {
     let mut poll_interval = 60;
     let mut prometheus_push_gateway: Option<String> = None;
 
@@ -99,10 +121,7 @@ fn main() {
         poll_interval_duration.as_secs()
     );
 
-    let syslog = syslog::unix(Facility::LOG_DAEMON).unwrap_or_else(|err| {
-        eprintln!("Unable to connect to syslog: {}", err);
-        std::process::exit(1);
-    });
+    let syslog = syslog::unix(Facility::LOG_DAEMON).chain_err(|| "Unable to connect to syslog")?;
 
     let mut mount_statuses = HashMap::<PathBuf, MountStatus>::new();
 
@@ -114,7 +133,7 @@ fn main() {
         let total_mounts = mount_statuses.len();
         let dead_mounts = mount_statuses
             .iter()
-            .filter(|&(_, status)| !status.alive)
+            .filter(|&(_, status)| !status.success())
             .count();
 
         // TODO: consider making this debug or sending it to stdout?
@@ -189,50 +208,64 @@ fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &sys
 
     for mount_point in mount_points {
         // Check whether there's a pending test:
-        if let Some(mount_status) = mount_statuses.get_mut(&mount_point) {
-            if mount_status.check_process.is_some() {
-                let child = mount_status.check_process.as_mut().unwrap();
-
-                match child.try_wait() {
-                    Ok(Some(status)) => {
-                        logger
-                            .info(format!(
-                                "Slow check for mount {} exited with {} after {} seconds",
-                                mount_point.display(),
-                                status,
-                                mount_status.last_checked.elapsed().as_secs()
-                            ))
-                            .unwrap_or_else(handle_syslog_error);
-                        ()
-                    }
-                    Ok(None) => {
-                        logger
-                            .warning(format!(
-                                "Slow check for mount {} has not exited after {} seconds",
-                                mount_point.display(),
-                                mount_status.last_checked.elapsed().as_secs()
-                            ))
-                            .unwrap_or_else(handle_syslog_error);
-                        continue;
-                    }
-                    Err(e) => {
-                        logger
-                            .err(format!(
-                                "Stalled check on mount {} returned an error after {} seconds: {}",
-                                mount_point.display(),
-                                mount_status.last_checked.elapsed().as_secs(),
-                                e
-                            ))
-                            .unwrap_or_else(handle_syslog_error);
-                        ()
-                    }
+        if let Some(&mut MountStatus::CheckRunning{ref mut process, start_time}) = mount_statuses.get_mut(&mount_point) {
+            match process.try_wait() {
+                Ok(Some(status)) => {
+                    logger
+                        .info(format!(
+                            "Slow check for mount {} exited with {} after {} seconds",
+                            mount_point.display(),
+                            status,
+                            start_time.elapsed().as_secs()
+                        ))
+                        .unwrap_or_else(handle_syslog_error);
+                }
+                Ok(None) => {
+                    logger
+                        .warning(format!(
+                            "Slow check for mount {} has not exited after {} seconds",
+                            mount_point.display(),
+                            start_time.elapsed().as_secs()
+                        ))
+                        .unwrap_or_else(handle_syslog_error);
+                    continue;
+                }
+                Err(e) => {
+                    logger
+                        .err(format!(
+                            "Stalled check on mount {} returned an error after {} seconds: {}",
+                            mount_point.display(),
+                            start_time.elapsed().as_secs(),
+                            e
+                        ))
+                        .unwrap_or_else(handle_syslog_error);
                 }
             }
         }
 
-        let mount_status = check_mount(&mount_point);
-
-        if mount_status.alive {
+        let mount_status = match check_mount(&mount_point) {
+            Ok(mount_status) => mount_status,
+            Err(e) => {
+                eprintln!("{}", e);
+                continue;
+            }
+        };
+        match mount_status {
+            MountStatus::CheckFailed(rc) => {
+                eprintln!(
+                    "Mount check failed with an unexpected return code: {}",
+                    rc
+                );
+            }
+            MountStatus::CheckSignaled(signal) => {
+                eprintln!(
+                    "Mount check was killed by signal: {}",
+                    signal
+                );
+            }
+            _ => { }
+        }
+        if mount_status.success() {
             logger
                 .debug(format!(
                     "Mount passed health-check: {}",
@@ -249,22 +282,18 @@ fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &sys
     }
 }
 
-fn check_mount(mount_point: &Path) -> MountStatus {
-    let mut mount_status = MountStatus {
-        last_checked: Instant::now(),
-        alive: false,
-        check_process: None,
-    };
-
+fn check_mount(mount_point: &Path) -> Result<MountStatus> {
+    let start_time = Instant::now();
     let mut child = process::Command::new("/usr/bin/stat")
         .arg(mount_point)
         .stdout(process::Stdio::null())
         .spawn()
-        .unwrap();
+        .chain_err(|| "Unable to spawn process to check mount")?;
 
     // See https://github.com/rust-lang/rust/issues/18166 for why we can't make this a static value:
-    match child.wait_timeout(Duration::from_secs(3)) {
-        Ok(None) => {
+    let child_result = child.wait_timeout(Duration::from_secs(3)).chain_err(|| "Unable to wait on stat command")?;
+    match child_result {
+        None => {
             /*
                 The process has not exited and we're not going to wait for a
                 potentially very long period of time for it to recover.
@@ -278,31 +307,29 @@ fn check_mount(mount_point: &Path) -> MountStatus {
                 process instance so future checks can perform a non-blocking
                 test to see whether it has finally exited:
             */
-
             if let Err(err) = child.kill() {
                 eprintln!("Unable to kill process {}: {:?}", child.id(), err)
             };
 
-            mount_status.check_process = Some(child);
+            Ok(MountStatus::CheckRunning {
+                process: child,
+                start_time: start_time,
+            })            
         }
-        Ok(Some(exit_status)) => {
+        Some(exit_status) => {
             let rc = exit_status.code();
             match rc {
-                Some(0) => mount_status.alive = true,
-                Some(rc) => eprintln!(
-                    "Mount check failed with an unexpected return code: {:?}",
-                    rc
-                ),
-                None => eprintln!(
-                    "Child did not have an exit status; unix signal = {:?}",
-                    exit_status.unix_signal()
-                ),
+                Some(0) => {
+                    Ok(MountStatus::Alive)
+                }
+                Some(rc) => {
+                    Ok(MountStatus::CheckFailed(rc))
+                }
+                None => {
+                    // If there isn't a return code, there _should_ always be a signal
+                    Ok(MountStatus::CheckSignaled(exit_status.unix_signal().unwrap_or(0)))
+                }
             }
         }
-        Err(e) => {
-            eprintln!("Error waiting for child process: {:?}", e);
-        }
-    };
-
-    mount_status
+    }
 }
