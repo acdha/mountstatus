@@ -25,6 +25,7 @@ extern crate argparse;
 extern crate libc;
 extern crate syslog;
 extern crate wait_timeout;
+extern crate rayon;
 
 #[macro_use]
 extern crate error_chain;
@@ -50,6 +51,8 @@ use std::path::{Path, PathBuf};
 use argparse::{ArgumentParser, Store, StoreOption};
 use syslog::Facility;
 use wait_timeout::ChildExt;
+
+use rayon::prelude::*;
 
 mod errors;
 mod get_mounts;
@@ -207,8 +210,11 @@ fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &sys
     });
 
     for mount_point in mount_points {
-        // Check whether there's a pending test:
-        if let Some(&mut MountStatus::CheckRunning{ref mut process, start_time}) = mount_statuses.get_mut(&mount_point) {
+        mount_statuses.entry(mount_point).or_insert(MountStatus::Alive);
+    }
+
+    mount_statuses.par_iter_mut().for_each(|(mount_point, mount_status)| {
+        if let MountStatus::CheckRunning{ref mut process, start_time} = *mount_status {
             match process.try_wait() {
                 Ok(Some(status)) => {
                     logger
@@ -228,7 +234,7 @@ fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &sys
                             start_time.elapsed().as_secs()
                         ))
                         .unwrap_or_else(handle_syslog_error);
-                    continue;
+                    return;
                 }
                 Err(e) => {
                     logger
@@ -242,15 +248,15 @@ fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &sys
                 }
             }
         }
-
-        let mount_status = match check_mount(&mount_point) {
-            Ok(mount_status) => mount_status,
+        let new_mount_status = match check_mount(mount_point) {
+            Ok(status) => status,
             Err(e) => {
                 eprintln!("{}", e);
-                continue;
+                return;
             }
         };
-        match mount_status {
+
+        match new_mount_status {
             MountStatus::CheckFailed(rc) => {
                 eprintln!(
                     "Mount check failed with an unexpected return code: {}",
@@ -265,7 +271,7 @@ fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &sys
             }
             _ => { }
         }
-        if mount_status.success() {
+        if new_mount_status.success() {
             logger
                 .debug(format!(
                     "Mount passed health-check: {}",
@@ -278,8 +284,8 @@ fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &sys
             logger.err(msg).unwrap_or_else(handle_syslog_error);
         }
 
-        mount_statuses.insert(mount_point.to_owned(), mount_status);
-    }
+        *mount_status = new_mount_status;
+    });
 }
 
 fn check_mount(mount_point: &Path) -> Result<MountStatus> {
