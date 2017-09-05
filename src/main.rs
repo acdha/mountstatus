@@ -30,14 +30,14 @@ extern crate rayon;
 #[macro_use]
 extern crate error_chain;
 
-#[cfg(feature = "with_server")]
+#[cfg(feature = "with_prometheus")]
 extern crate hostname;
 
-#[cfg(feature = "with_server")]
+#[cfg(feature = "with_prometheus")]
 #[macro_use]
 extern crate lazy_static;
 
-#[cfg(feature = "with_server")]
+#[cfg(feature = "with_prometheus")]
 #[macro_use]
 extern crate prometheus;
 
@@ -101,7 +101,7 @@ fn real_main() -> Result<()> {
             " a Prometheus push-gateway service."
         ));
 
-        if cfg!(feature = "with_server") {
+        if cfg!(feature = "with_prometheus") {
             ap.refer(&mut prometheus_push_gateway).add_option(
                 &["--prometheus-push-gateway"],
                 StoreOption,
@@ -159,13 +159,17 @@ fn real_main() -> Result<()> {
     }
 }
 
-#[cfg(not(feature = "with_server"))]
-fn push_to_server(_: &str, _: usize, _: usize) -> Result<(), &'static str> {
+#[cfg(not(feature = "with_prometheus"))]
+fn push_to_server(_: &str, _: usize, _: usize) -> Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "with_server")]
-fn push_to_server(gateway: &str, dead_mounts: usize, total_mounts: usize) -> prometheus::Result<()> {
+#[cfg(feature = "with_prometheus")]
+fn push_to_server(
+    gateway: &str,
+    dead_mounts: usize,
+    total_mounts: usize,
+) -> prometheus::Result<()> {
     lazy_static! {
         static ref TOTAL_MOUNTS: prometheus::Gauge = register_gauge!(
             "total_mountpoints",
@@ -210,82 +214,84 @@ fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &sys
     });
 
     for mount_point in mount_points {
-        mount_statuses.entry(mount_point).or_insert(MountStatus::Alive);
+        mount_statuses
+            .entry(mount_point)
+            .or_insert(MountStatus::Alive);
     }
 
-    mount_statuses.par_iter_mut().for_each(|(mount_point, mount_status)| {
-        if let MountStatus::CheckRunning{ref mut process, start_time} = *mount_status {
-            match process.try_wait() {
-                Ok(Some(status)) => {
-                    logger
-                        .info(format!(
-                            "Slow check for mount {} exited with {} after {} seconds",
-                            mount_point.display(),
-                            status,
-                            start_time.elapsed().as_secs()
-                        ))
-                        .unwrap_or_else(handle_syslog_error);
+    mount_statuses
+        .par_iter_mut()
+        .for_each(|(mount_point, mount_status)| {
+            if let MountStatus::CheckRunning {
+                ref mut process,
+                start_time,
+            } = *mount_status
+            {
+                match process.try_wait() {
+                    Ok(Some(status)) => {
+                        logger
+                            .info(format!(
+                                "Slow check for mount {} exited with {} after {} seconds",
+                                mount_point.display(),
+                                status,
+                                start_time.elapsed().as_secs()
+                            ))
+                            .unwrap_or_else(handle_syslog_error);
+                    }
+                    Ok(None) => {
+                        logger
+                            .warning(format!(
+                                "Slow check for mount {} has not exited after {} seconds",
+                                mount_point.display(),
+                                start_time.elapsed().as_secs()
+                            ))
+                            .unwrap_or_else(handle_syslog_error);
+                        return;
+                    }
+                    Err(e) => {
+                        logger
+                            .err(format!(
+                                "Stalled check on mount {} returned an error after {} seconds: {}",
+                                mount_point.display(),
+                                start_time.elapsed().as_secs(),
+                                e
+                            ))
+                            .unwrap_or_else(handle_syslog_error);
+                    }
                 }
-                Ok(None) => {
-                    logger
-                        .warning(format!(
-                            "Slow check for mount {} has not exited after {} seconds",
-                            mount_point.display(),
-                            start_time.elapsed().as_secs()
-                        ))
-                        .unwrap_or_else(handle_syslog_error);
+            }
+            let new_mount_status = match check_mount(mount_point) {
+                Ok(status) => status,
+                Err(e) => {
+                    eprintln!("{}", e);
                     return;
                 }
-                Err(e) => {
-                    logger
-                        .err(format!(
-                            "Stalled check on mount {} returned an error after {} seconds: {}",
-                            mount_point.display(),
-                            start_time.elapsed().as_secs(),
-                            e
-                        ))
-                        .unwrap_or_else(handle_syslog_error);
+            };
+
+            match new_mount_status {
+                MountStatus::CheckFailed(rc) => {
+                    eprintln!("Mount check failed with an unexpected return code: {}", rc);
                 }
+                MountStatus::CheckSignaled(signal) => {
+                    eprintln!("Mount check was killed by signal: {}", signal);
+                }
+                _ => {}
             }
-        }
-        let new_mount_status = match check_mount(mount_point) {
-            Ok(status) => status,
-            Err(e) => {
-                eprintln!("{}", e);
-                return;
+            if new_mount_status.success() {
+                logger
+                    .debug(format!(
+                        "Mount passed health-check: {}",
+                        mount_point.display()
+                    ))
+                    .unwrap_or_else(handle_syslog_error);
+            } else {
+                let msg = format!("Mount failed health-check: {}", mount_point.display());
+                eprintln!("{}", msg);
+                logger.err(msg).unwrap_or_else(handle_syslog_error);
             }
-        };
 
-        match new_mount_status {
-            MountStatus::CheckFailed(rc) => {
-                eprintln!(
-                    "Mount check failed with an unexpected return code: {}",
-                    rc
-                );
-            }
-            MountStatus::CheckSignaled(signal) => {
-                eprintln!(
-                    "Mount check was killed by signal: {}",
-                    signal
-                );
-            }
-            _ => { }
-        }
-        if new_mount_status.success() {
-            logger
-                .debug(format!(
-                    "Mount passed health-check: {}",
-                    mount_point.display()
-                ))
-                .unwrap_or_else(handle_syslog_error);
-        } else {
-            let msg = format!("Mount failed health-check: {}", mount_point.display());
-            eprintln!("{}", msg);
-            logger.err(msg).unwrap_or_else(handle_syslog_error);
-        }
-
-        *mount_status = new_mount_status;
-    });
+            *mount_status = new_mount_status;
+        });
 }
 
 fn check_mount(mount_point: &Path) -> Result<MountStatus> {
@@ -297,7 +303,9 @@ fn check_mount(mount_point: &Path) -> Result<MountStatus> {
         .chain_err(|| "Unable to spawn process to check mount")?;
 
     // See https://github.com/rust-lang/rust/issues/18166 for why we can't make this a static value:
-    let child_result = child.wait_timeout(Duration::from_secs(3)).chain_err(|| "Unable to wait on stat command")?;
+    let child_result = child
+        .wait_timeout(Duration::from_secs(3))
+        .chain_err(|| "Unable to wait on stat command")?;
     match child_result {
         None => {
             /*
@@ -320,20 +328,18 @@ fn check_mount(mount_point: &Path) -> Result<MountStatus> {
             Ok(MountStatus::CheckRunning {
                 process: child,
                 start_time: start_time,
-            })            
+            })
         }
         Some(exit_status) => {
             let rc = exit_status.code();
             match rc {
-                Some(0) => {
-                    Ok(MountStatus::Alive)
-                }
-                Some(rc) => {
-                    Ok(MountStatus::CheckFailed(rc))
-                }
+                Some(0) => Ok(MountStatus::Alive),
+                Some(rc) => Ok(MountStatus::CheckFailed(rc)),
                 None => {
                     // If there isn't a return code, there _should_ always be a signal
-                    Ok(MountStatus::CheckSignaled(exit_status.unix_signal().unwrap_or(0)))
+                    Ok(MountStatus::CheckSignaled(
+                        exit_status.unix_signal().unwrap_or(0),
+                    ))
                 }
             }
         }

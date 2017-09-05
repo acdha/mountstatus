@@ -19,5 +19,5 @@ features = ["push"]
 optional = true
 
 [features]
-default = ["with_server"]
-with_server = ["lazy_static", "prometheus", "hostname"]
+default = ["with_prometheus"]
+with_prometheus = ["lazy_static", "prometheus", "hostname"]
