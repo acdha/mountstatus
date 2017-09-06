@@ -1,4 +1,13 @@
+# Build release packages for RPM & DEB systems
+
 FROM rust AS builder
+
+# Unfortunately ARG has to be declared per stage so while we're declaring this here
+# so we can fail immediately if --build-arg wasn't specified we also have to specify
+# ARG in each stage of the build:
+
+ARG PACKAGE_VERSION
+RUN if [ -z "${PACKAGE_VERSION}" ]; then echo "--build-arg PACKAGE_VERSION is required"; exit 1; fi
 
 WORKDIR /mountstatus
 
@@ -14,9 +23,10 @@ COPY src/ /mountstatus/src/
 RUN cargo build --release
 
 FROM debian:stretch AS deb_builder
+ARG PACKAGE_VERSION
 
-RUN apt-get -qy update && apt-get -qy install ruby ruby-dev rubygems build-essential && apt-get clean
-RUN gem install --no-ri --no-rdoc fpm && gem clean
+RUN apt-get -qqy update && apt-get -qqy install ruby ruby-dev rubygems build-essential && apt-get clean
+RUN gem install --no-ri --no-rdoc --quiet fpm && gem clean
 
 WORKDIR /package-build
 
@@ -26,9 +36,10 @@ COPY systemd/mount_status_monitor.service /package-build/
 # This is good for a ~60% size reduction:
 RUN strip mount_status_monitor
 
-RUN fpm -s dir -t deb -n mount-status-monitor mount_status_monitor=/usr/sbin/mount_status_monitor mount_status_monitor.service=/etc/systemd/system/mount_status_monitor.service
+RUN fpm -s dir -t deb -n mount-status-monitor --version ${PACKAGE_VERSION} mount_status_monitor=/usr/sbin/mount_status_monitor mount_status_monitor.service=/etc/systemd/system/mount_status_monitor.service
 
 FROM centos:7 AS rpm_el7_builder
+ARG PACKAGE_VERSION
 
 RUN yum install -q -y ruby-devel gcc make rpm-build libffi-devel
 RUN gem install --no-ri --no-rdoc fpm && gem clean
@@ -41,7 +52,7 @@ COPY systemd/mount_status_monitor.service /package-build/
 # This is good for a ~60% size reduction:
 RUN strip mount_status_monitor
 
-RUN fpm -s dir -t rpm --rpm-dist el7 -n mount-status-monitor mount_status_monitor=/usr/sbin/mount_status_monitor mount_status_monitor.service=/etc/systemd/system/mount_status_monitor.service
+RUN fpm -s dir -t rpm --rpm-dist el7 -n mount-status-monitor --version ${PACKAGE_VERSION} mount_status_monitor=/usr/sbin/mount_status_monitor mount_status_monitor.service=/etc/systemd/system/mount_status_monitor.service
 
 FROM debian:stretch AS aggregator
 
