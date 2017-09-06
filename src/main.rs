@@ -148,9 +148,12 @@ fn real_main() -> Result<()> {
             ))
             .unwrap_or_else(handle_syslog_error);
 
-        if let Some(ref gateway_address) = prometheus_push_gateway {
-            if let Err(e) = push_to_server(gateway_address, dead_mounts, total_mounts) {
-                eprintln!("{}", e);
+        #[cfg(feature = "with_prometheus")]
+        {
+            if let Some(ref gateway_address) = prometheus_push_gateway {
+                if let Err(e) = push_to_prometheus(gateway_address, dead_mounts, total_mounts) {
+                    eprintln!("{}", e);
+                }
             }
         }
 
@@ -159,13 +162,8 @@ fn real_main() -> Result<()> {
     }
 }
 
-#[cfg(not(feature = "with_prometheus"))]
-fn push_to_server(_: &str, _: usize, _: usize) -> Result<()> {
-    Ok(())
-}
-
 #[cfg(feature = "with_prometheus")]
-fn push_to_server(
+fn push_to_prometheus(
     gateway: &str,
     dead_mounts: usize,
     total_mounts: usize,
