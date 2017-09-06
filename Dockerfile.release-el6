@@ -1,0 +1,39 @@
+# This is a separate dockerfile since RHEL/Centos 6 is old enough that the official Rust images
+# produce executables which depend on a newer version of libc. This seems cleaner than using
+# musl but that might warrant reconsideration if we can't just ignore antique Linux distributions
+# in the near future.
+
+FROM centos:6
+ARG PACKAGE_VERSION
+
+ENV RUST_ARCHIVE=rust-1.20.0-x86_64-unknown-linux-gnu.tar.gz
+ENV RUST_DOWNLOAD_URL=https://static.rust-lang.org/dist/$RUST_ARCHIVE
+
+RUN yum --quiet -y update && yum --quiet -y install git gcc curl openssl openssl-devel ca-certificates tar ruby-devel rubygems gcc make rpm-build libffi-devel && yum clean all --quiet
+
+WORKDIR /rust
+
+RUN curl -fsOSL $RUST_DOWNLOAD_URL \
+    && curl -s $RUST_DOWNLOAD_URL.sha256 | sha256sum -c - \
+    && tar -C /rust -xzf $RUST_ARCHIVE --strip-components=1 \
+    && rm $RUST_ARCHIVE \
+    && ./install.sh
+
+# Unfortunately the Ruby toolchain for FPM increasingly depends on newer libraries & Ruby versions. Since
+# we're just building packages it's easiest to pin old versions:
+# See https://github.com/jordansissel/fpm/issues/1090 and https://github.com/jordansissel/fpm/issues/1192
+RUN gem install --no-ri --no-rdoc json --version '<1.8.0' && gem install --no-ri --no-rdoc fpm --version '<1.5.0' && gem clean
+
+WORKDIR /mountstatus
+
+COPY Cargo.toml /mountstatus/
+COPY src/ /mountstatus/src/
+COPY upstart/ /mountstatus/upstart/
+
+# EL6 has a very old version of Upstart which predates support for console logging:
+RUN sed -i.bak '/console log/d' /mountstatus/upstart/*.conf
+
+RUN cargo build --release && strip target/release/mount_status_monitor
+RUN fpm -s dir -t rpm --rpm-dist el6 -n mount-status-monitor --version ${PACKAGE_VERSION} --replaces MountStatusMonitor target/release/mount_status_monitor=/usr/sbin/mount_status_monitor upstart/mount_status_monitor.conf=/etc/init/mount_status_monitor.conf
+
+CMD /bin/cp -vr /mountstatus/*.rpm /host-packages-volume
