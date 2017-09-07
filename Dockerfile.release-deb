@@ -14,11 +14,12 @@ RUN cargo build --release
 WORKDIR /package-build
 
 RUN mv /mountstatus/target/release/mount_status_monitor /package-build/
-COPY systemd/mount_status_monitor.service /package-build/
+COPY packaging/sysconfig /package-build/
+COPY packaging/systemd/mount_status_monitor.service /package-build/
 
 # This is good for a ~60% size reduction:
 RUN strip mount_status_monitor
 
-RUN fpm -s dir -t deb -n mount-status-monitor --version ${PACKAGE_VERSION} --replaces MountStatusMonitor mount_status_monitor=/usr/sbin/mount_status_monitor mount_status_monitor.service=/etc/systemd/system/mount_status_monitor.service
+RUN fpm -s dir -t deb -n mount-status-monitor --version ${PACKAGE_VERSION} --replaces MountStatusMonitor mount_status_monitor=/usr/sbin/mount_status_monitor mount_status_monitor.service=/etc/systemd/system/mount_status_monitor.service sysconfig=/etc/sysconfig/mount_status_monitor
 
 CMD /bin/cp -vr /package-build/*.deb /host-packages-volume

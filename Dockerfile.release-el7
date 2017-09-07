@@ -21,9 +21,10 @@ WORKDIR /mountstatus
 
 COPY Cargo.toml /mountstatus/
 COPY src/ /mountstatus/src/
-COPY systemd/ /mountstatus/systemd/
+COPY packaging/systemd/ /mountstatus/systemd/
+COPY packaging/sysconfig /mountstatus/
 
 RUN cargo build --release && strip target/release/mount_status_monitor
-RUN fpm -s dir -t rpm --rpm-dist el7 -n mount-status-monitor --version ${PACKAGE_VERSION} --replaces MountStatusMonitor target/release/mount_status_monitor=/usr/sbin/mount_status_monitor systemd/mount_status_monitor.service=/etc/systemd/system/mount_status_monitor.service
+RUN fpm -s dir -t rpm --rpm-dist el7 -n mount-status-monitor --version ${PACKAGE_VERSION} --replaces MountStatusMonitor target/release/mount_status_monitor=/usr/sbin/mount_status_monitor systemd/mount_status_monitor.service=/etc/systemd/system/mount_status_monitor.service sysconfig=/etc/sysconfig/mount_status_monitor
 
 CMD /bin/cp -vr /mountstatus/*.rpm /host-packages-volume
