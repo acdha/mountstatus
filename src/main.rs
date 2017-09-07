@@ -48,7 +48,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::path::{Path, PathBuf};
 
-use argparse::{ArgumentParser, Store, StoreOption};
+use argparse::{ArgumentParser, Store, StoreOption, Print};
 use syslog::Facility;
 use wait_timeout::ChildExt;
 
@@ -101,6 +101,12 @@ fn real_main() -> Result<()> {
             " a Prometheus push-gateway service."
         ));
 
+        ap.add_option(
+            &["--version"],
+            Print(env!("CARGO_PKG_VERSION").to_string()),
+            "Show version",
+        );
+
         if cfg!(feature = "with_prometheus") {
             ap.refer(&mut prometheus_push_gateway).add_option(
                 &["--prometheus-push-gateway"],
@@ -114,6 +120,7 @@ fn real_main() -> Result<()> {
             Store,
             "Number of seconds to wait before checking mounts",
         );
+
         ap.parse_args_or_exit();
     }
 
