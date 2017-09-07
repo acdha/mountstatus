@@ -2,6 +2,11 @@
 name = "mount_status_monitor"
 version = "2.0.0"
 authors = [ "Chris Adams <chris@improbable.org>" ]
+description = "Paranoid filesystem monitor which reports malfunctioning mountpoints"
+homepage = "https://github.com/acdha/mountstatus"
+repository = "https://github.com/acdha/mountstatus.git"
+readme = "README.markdown"
+license =  "CC0-1.0"
 
 [dependencies]
 wait-timeout = "0.1.5"
@@ -9,7 +14,7 @@ libc = "0.2.29"
 syslog = "3.3.0"
 lazy_static = { version="0.2.1", optional=true }
 hostname = { version="^0.1", optional=true }
-argparse = "*"
+argparse = "0.2.1"
 error-chain = "0.10"
 rayon = "0.8"
 
