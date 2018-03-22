@@ -48,7 +48,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::path::{Path, PathBuf};
 
-use argparse::{ArgumentParser, Store, StoreOption, Print};
+use argparse::{ArgumentParser, Store, StoreTrue, StoreOption, Print};
 use syslog::Facility;
 use wait_timeout::ChildExt;
 
@@ -91,6 +91,7 @@ quick_main!{ real_main }
 fn real_main() -> Result<()> {
     let mut poll_interval = 60;
     let mut prometheus_push_gateway: Option<String> = None;
+    let mut once_only = false;
 
     {
         // this block limits scope of borrows by ap.refer() method
@@ -119,6 +120,12 @@ fn real_main() -> Result<()> {
             &["--poll-interval"],
             Store,
             "Number of seconds to wait before checking mounts",
+        );
+
+        ap.refer(&mut once_only).add_option(
+            &["-1", "--once-only"],
+            StoreTrue,
+            "Check the status once and exit",
         );
 
         ap.parse_args_or_exit();
@@ -163,7 +170,9 @@ fn real_main() -> Result<()> {
                 }
             }
         }
-
+        if once_only {
+            std::process::exit(0);
+        }
         // Wait before checking again:
         thread::sleep(poll_interval_duration);
     }
