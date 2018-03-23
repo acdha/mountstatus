@@ -59,6 +59,8 @@ mod get_mounts;
 
 use errors::*;
 
+static mut VERBOSE: bool = false;
+
 fn handle_syslog_error(err: std::io::Error) -> usize {
     // Convenience function allowing all of our syslog calls to use .unwrap_or_else
     eprintln!("Syslog failed: {}", err);
@@ -128,15 +130,25 @@ fn real_main() -> Result<()> {
             "Check the status once and exit",
         );
 
+        unsafe {
+            ap.refer(&mut VERBOSE).add_option(
+                &["--verbose"],
+                StoreTrue,
+                "Print bad mounts on standard output",
+                );
+        }
+
         ap.parse_args_or_exit();
     }
 
     let poll_interval_duration = Duration::from_secs(poll_interval);
 
-    println!(
-        "mount_status_monitor checking mounts every {} seconds",
-        poll_interval_duration.as_secs()
-    );
+    if !once_only {
+        println!(
+            "mount_status_monitor checking mounts every {} seconds",
+            poll_interval_duration.as_secs()
+        );
+    }
 
     let syslog = syslog::unix(Facility::LOG_DAEMON).chain_err(|| "Unable to connect to syslog")?;
 
@@ -301,6 +313,11 @@ fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &sys
             } else {
                 let msg = format!("Mount failed health-check: {}", mount_point.display());
                 eprintln!("{}", msg);
+                unsafe {
+                    if VERBOSE {
+                        println!("{}", mount_point.display())
+                    }
+                }
                 logger.err(msg).unwrap_or_else(handle_syslog_error);
             }
 
