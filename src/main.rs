@@ -59,8 +59,6 @@ mod get_mounts;
 
 use errors::*;
 
-static mut VERBOSE: bool = false;
-
 fn handle_syslog_error(err: std::io::Error) -> usize {
     // Convenience function allowing all of our syslog calls to use .unwrap_or_else
     eprintln!("Syslog failed: {}", err);
@@ -91,9 +89,18 @@ impl MountStatus {
 quick_main!{ real_main }
 
 fn real_main() -> Result<()> {
-    let mut poll_interval = 60;
-    let mut prometheus_push_gateway: Option<String> = None;
-    let mut once_only = false;
+    struct Options {
+        once_only: bool,
+        poll_interval: u64,
+        prometheus_push_gateway: Option<String>,
+        verbose: bool,
+    }
+    let mut options = Options {
+        once_only: false,
+        poll_interval: 60,
+        prometheus_push_gateway: None,
+        verbose: false,
+    };
 
     {
         // this block limits scope of borrows by ap.refer() method
@@ -111,39 +118,38 @@ fn real_main() -> Result<()> {
         );
 
         if cfg!(feature = "with_prometheus") {
-            ap.refer(&mut prometheus_push_gateway).add_option(
+            ap.refer(&mut options.prometheus_push_gateway).add_option(
                 &["--prometheus-push-gateway"],
                 StoreOption,
                 "Location of the Prometheus push-gateway server to send metrics to",
             );
         }
 
-        ap.refer(&mut poll_interval).add_option(
+        ap.refer(&mut options.poll_interval).add_option(
             &["--poll-interval"],
             Store,
             "Number of seconds to wait before checking mounts",
         );
 
-        ap.refer(&mut once_only).add_option(
+        ap.refer(&mut options.once_only).add_option(
             &["-1", "--once-only"],
             StoreTrue,
             "Check the status once and exit",
         );
 
-        unsafe {
-            ap.refer(&mut VERBOSE).add_option(
-                &["--verbose"],
-                StoreTrue,
-                "Print bad mounts on standard output",
-                );
-        }
+
+        ap.refer(&mut options.verbose).add_option(
+            &["--verbose"],
+            StoreTrue,
+            "Print bad mounts on standard output",
+        );
 
         ap.parse_args_or_exit();
     }
 
-    let poll_interval_duration = Duration::from_secs(poll_interval);
+    let poll_interval_duration = Duration::from_secs(options.poll_interval);
 
-    if !once_only {
+    if !options.once_only {
         println!(
             "mount_status_monitor checking mounts every {} seconds",
             poll_interval_duration.as_secs()
@@ -155,7 +161,7 @@ fn real_main() -> Result<()> {
     let mut mount_statuses = HashMap::<PathBuf, MountStatus>::new();
 
     loop {
-        check_mounts(&mut mount_statuses, &syslog);
+        check_mounts(&mut mount_statuses, &syslog, options.verbose);
 
         // We calculate these values each time because a filesystem may have been
         // mounted or unmounted since the last check:
@@ -176,13 +182,13 @@ fn real_main() -> Result<()> {
 
         #[cfg(feature = "with_prometheus")]
         {
-            if let Some(ref gateway_address) = prometheus_push_gateway {
+            if let Some(ref gateway_address) = options.prometheus_push_gateway {
                 if let Err(e) = push_to_prometheus(gateway_address, dead_mounts, total_mounts) {
                     eprintln!("{}", e);
                 }
             }
         }
-        if once_only {
+        if options.once_only {
             std::process::exit(0);
         }
         // Wait before checking again:
@@ -228,7 +234,7 @@ fn push_to_prometheus(
     )
 }
 
-fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &syslog::Logger) {
+fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &syslog::Logger, verbose: bool) {
     let mount_points = get_mounts::get_mount_points().unwrap_or_else(|err| {
         eprintln!("Failed to retrieve a list of mount-points: {:?}", err);
         std::process::exit(2);
@@ -313,10 +319,8 @@ fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &sys
             } else {
                 let msg = format!("Mount failed health-check: {}", mount_point.display());
                 eprintln!("{}", msg);
-                unsafe {
-                    if VERBOSE {
-                        println!("{}", mount_point.display())
-                    }
+                if verbose {
+                    println!("{}", mount_point.display())
                 }
                 logger.err(msg).unwrap_or_else(handle_syslog_error);
             }
