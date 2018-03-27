@@ -9,7 +9,7 @@
 
     This can't be solved easily by using asynchronous I/O APIs because key
     platforms like Linux don't implement an async stat(2) equivalent. This
-    program uses the broadly-portable approach of launch an external child
+    program uses the broadly-portable approach of launching an external child
     process asynchronously with a timeout. If it fails to respond by the
     deadline, we'll send it a SIGKILL and avoid further checks until the process
     disappears to avoid accumulating blocked check processes.
