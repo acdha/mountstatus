@@ -9,7 +9,7 @@
 
     This can't be solved easily by using asynchronous I/O APIs because key
     platforms like Linux don't implement an async stat(2) equivalent. This
-    program uses the broadly-portable approach of launch an external child
+    program uses the broadly-portable approach of launching an external child
     process asynchronously with a timeout. If it fails to respond by the
     deadline, we'll send it a SIGKILL and avoid further checks until the process
     disappears to avoid accumulating blocked check processes.
@@ -23,9 +23,9 @@
 
 extern crate argparse;
 extern crate libc;
+extern crate rayon;
 extern crate syslog;
 extern crate wait_timeout;
-extern crate rayon;
 
 #[macro_use]
 extern crate error_chain;
@@ -48,7 +48,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::path::{Path, PathBuf};
 
-use argparse::{ArgumentParser, Store, StoreOption, Print};
+use argparse::{ArgumentParser, Print, Store, StoreOption, StoreTrue};
 use syslog::Facility;
 use wait_timeout::ChildExt;
 
@@ -73,7 +73,7 @@ enum MountStatus {
     CheckRunning {
         process: process::Child,
         start_time: Instant,
-    }
+    },
 }
 
 impl MountStatus {
@@ -89,8 +89,18 @@ impl MountStatus {
 quick_main!{ real_main }
 
 fn real_main() -> Result<()> {
-    let mut poll_interval = 60;
-    let mut prometheus_push_gateway: Option<String> = None;
+    struct Options {
+        once_only: bool,
+        poll_interval: u64,
+        prometheus_push_gateway: Option<String>,
+        print_bad_mounts: bool,
+    }
+    let mut options = Options {
+        once_only: false,
+        poll_interval: 60,
+        prometheus_push_gateway: None,
+        print_bad_mounts: false,
+    };
 
     {
         // this block limits scope of borrows by ap.refer() method
@@ -108,35 +118,49 @@ fn real_main() -> Result<()> {
         );
 
         if cfg!(feature = "with_prometheus") {
-            ap.refer(&mut prometheus_push_gateway).add_option(
+            ap.refer(&mut options.prometheus_push_gateway).add_option(
                 &["--prometheus-push-gateway"],
                 StoreOption,
                 "Location of the Prometheus push-gateway server to send metrics to",
             );
         }
 
-        ap.refer(&mut poll_interval).add_option(
+        ap.refer(&mut options.poll_interval).add_option(
             &["--poll-interval"],
             Store,
             "Number of seconds to wait before checking mounts",
         );
 
+        ap.refer(&mut options.once_only).add_option(
+            &["-1", "--once-only"],
+            StoreTrue,
+            "Check the status once and exit",
+        );
+
+        ap.refer(&mut options.print_bad_mounts).add_option(
+            &["--print-bad-mounts"],
+            StoreTrue,
+            "Print bad mounts on standard output",
+        );
+
         ap.parse_args_or_exit();
     }
 
-    let poll_interval_duration = Duration::from_secs(poll_interval);
+    let poll_interval_duration = Duration::from_secs(options.poll_interval);
 
-    println!(
-        "mount_status_monitor checking mounts every {} seconds",
-        poll_interval_duration.as_secs()
-    );
+    if !options.once_only {
+        println!(
+            "mount_status_monitor checking mounts every {} seconds",
+            poll_interval_duration.as_secs()
+        );
+    }
 
     let syslog = syslog::unix(Facility::LOG_DAEMON).chain_err(|| "Unable to connect to syslog")?;
 
     let mut mount_statuses = HashMap::<PathBuf, MountStatus>::new();
 
     loop {
-        check_mounts(&mut mount_statuses, &syslog);
+        check_mounts(&mut mount_statuses, &syslog, options.print_bad_mounts);
 
         // We calculate these values each time because a filesystem may have been
         // mounted or unmounted since the last check:
@@ -150,18 +174,21 @@ fn real_main() -> Result<()> {
         syslog
             .info(format!(
                 "Checked {} mounts; {} are dead",
-                total_mounts,
-                dead_mounts
+                total_mounts, dead_mounts
             ))
             .unwrap_or_else(handle_syslog_error);
 
         #[cfg(feature = "with_prometheus")]
         {
-            if let Some(ref gateway_address) = prometheus_push_gateway {
+            if let Some(ref gateway_address) = options.prometheus_push_gateway {
                 if let Err(e) = push_to_prometheus(gateway_address, dead_mounts, total_mounts) {
                     eprintln!("{}", e);
                 }
             }
+        }
+
+        if options.once_only {
+            std::process::exit(0);
         }
 
         // Wait before checking again:
@@ -207,16 +234,18 @@ fn push_to_prometheus(
     )
 }
 
-fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &syslog::Logger) {
+fn check_mounts(
+    mount_statuses: &mut HashMap<PathBuf, MountStatus>,
+    logger: &syslog::Logger,
+    print_bad_mounts: bool,
+) {
     let mount_points = get_mounts::get_mount_points().unwrap_or_else(|err| {
         eprintln!("Failed to retrieve a list of mount-points: {:?}", err);
         std::process::exit(2);
     });
 
     // Remove any mount status entries which are no longer in the current list of mountpoints:
-    mount_statuses.retain(|ref k, _| {
-        mount_points.iter().position(|i| *i == **k).is_some()
-    });
+    mount_statuses.retain(|ref k, _| mount_points.iter().position(|i| *i == **k).is_some());
 
     for mount_point in mount_points {
         mount_statuses
@@ -292,6 +321,9 @@ fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &sys
             } else {
                 let msg = format!("Mount failed health-check: {}", mount_point.display());
                 eprintln!("{}", msg);
+                if print_bad_mounts {
+                    println!("{}", mount_point.display())
+                }
                 logger.err(msg).unwrap_or_else(handle_syslog_error);
             }
 
