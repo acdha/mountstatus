@@ -23,9 +23,9 @@
 
 extern crate argparse;
 extern crate libc;
+extern crate rayon;
 extern crate syslog;
 extern crate wait_timeout;
-extern crate rayon;
 
 #[macro_use]
 extern crate error_chain;
@@ -48,7 +48,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::path::{Path, PathBuf};
 
-use argparse::{ArgumentParser, Store, StoreTrue, StoreOption, Print};
+use argparse::{ArgumentParser, Print, Store, StoreOption, StoreTrue};
 use syslog::Facility;
 use wait_timeout::ChildExt;
 
@@ -73,7 +73,7 @@ enum MountStatus {
     CheckRunning {
         process: process::Child,
         start_time: Instant,
-    }
+    },
 }
 
 impl MountStatus {
@@ -175,8 +175,7 @@ fn real_main() -> Result<()> {
         syslog
             .info(format!(
                 "Checked {} mounts; {} are dead",
-                total_mounts,
-                dead_mounts
+                total_mounts, dead_mounts
             ))
             .unwrap_or_else(handle_syslog_error);
 
@@ -188,9 +187,11 @@ fn real_main() -> Result<()> {
                 }
             }
         }
+
         if options.once_only {
             std::process::exit(0);
         }
+
         // Wait before checking again:
         thread::sleep(poll_interval_duration);
     }
@@ -241,9 +242,7 @@ fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &sys
     });
 
     // Remove any mount status entries which are no longer in the current list of mountpoints:
-    mount_statuses.retain(|ref k, _| {
-        mount_points.iter().position(|i| *i == **k).is_some()
-    });
+    mount_statuses.retain(|ref k, _| mount_points.iter().position(|i| *i == **k).is_some());
 
     for mount_point in mount_points {
         mount_statuses
