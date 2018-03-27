@@ -93,13 +93,13 @@ fn real_main() -> Result<()> {
         once_only: bool,
         poll_interval: u64,
         prometheus_push_gateway: Option<String>,
-        verbose: bool,
+        print_bad_mounts: bool,
     }
     let mut options = Options {
         once_only: false,
         poll_interval: 60,
         prometheus_push_gateway: None,
-        verbose: false,
+        print_bad_mounts: false,
     };
 
     {
@@ -137,9 +137,8 @@ fn real_main() -> Result<()> {
             "Check the status once and exit",
         );
 
-
-        ap.refer(&mut options.verbose).add_option(
-            &["--verbose"],
+        ap.refer(&mut options.print_bad_mounts).add_option(
+            &["--print-bad-mounts"],
             StoreTrue,
             "Print bad mounts on standard output",
         );
@@ -161,7 +160,7 @@ fn real_main() -> Result<()> {
     let mut mount_statuses = HashMap::<PathBuf, MountStatus>::new();
 
     loop {
-        check_mounts(&mut mount_statuses, &syslog, options.verbose);
+        check_mounts(&mut mount_statuses, &syslog, options.print_bad_mounts);
 
         // We calculate these values each time because a filesystem may have been
         // mounted or unmounted since the last check:
@@ -235,7 +234,11 @@ fn push_to_prometheus(
     )
 }
 
-fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &syslog::Logger, verbose: bool) {
+fn check_mounts(
+    mount_statuses: &mut HashMap<PathBuf, MountStatus>,
+    logger: &syslog::Logger,
+    print_bad_mounts: bool,
+) {
     let mount_points = get_mounts::get_mount_points().unwrap_or_else(|err| {
         eprintln!("Failed to retrieve a list of mount-points: {:?}", err);
         std::process::exit(2);
@@ -318,7 +321,7 @@ fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, logger: &sys
             } else {
                 let msg = format!("Mount failed health-check: {}", mount_point.display());
                 eprintln!("{}", msg);
-                if verbose {
+                if print_bad_mounts {
                     println!("{}", mount_point.display())
                 }
                 logger.err(msg).unwrap_or_else(handle_syslog_error);
