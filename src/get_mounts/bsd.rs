@@ -1,11 +1,11 @@
 // Wrapper for the BSD getmntinfo() API which returns a list of mountpoints
 
+use std::ffi::{CStr, OsStr};
 use std::io::{Error, Result};
+use std::os::unix::ffi::OsStrExt;
+use std::path::PathBuf;
 use std::ptr;
 use std::slice;
-use std::path::PathBuf;
-use std::ffi::{CStr, OsStr};
-use std::os::unix::ffi::OsStrExt;
 
 use libc::{c_int, statfs};
 

@@ -42,11 +42,11 @@ extern crate lazy_static;
 extern crate prometheus;
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::str;
 use std::thread;
 use std::time::{Duration, Instant};
-use std::path::{Path, PathBuf};
 
 use argparse::{ArgumentParser, Print, Store, StoreOption, StoreTrue};
 use syslog::Facility;
@@ -203,15 +203,10 @@ fn push_to_prometheus(
     total_mounts: usize,
 ) -> prometheus::Result<()> {
     lazy_static! {
-        static ref TOTAL_MOUNTS: prometheus::Gauge = register_gauge!(
-            "total_mountpoints",
-            "Total number of mountpoints"
-        ).unwrap();
-
-        static ref DEAD_MOUNTS: prometheus::Gauge = register_gauge!(
-            "dead_mountpoints",
-            "Number of unresponsive mountpoints"
-        ).unwrap();
+        static ref TOTAL_MOUNTS: prometheus::Gauge =
+            register_gauge!("total_mountpoints", "Total number of mountpoints").unwrap();
+        static ref DEAD_MOUNTS: prometheus::Gauge =
+            register_gauge!("dead_mountpoints", "Number of unresponsive mountpoints").unwrap();
     }
 
     let prometheus_instance = match hostname::get_hostname() {
