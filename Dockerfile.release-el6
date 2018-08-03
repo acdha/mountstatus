@@ -2,7 +2,7 @@ FROM centos:6
 ARG PACKAGE_VERSION
 RUN if [ -z "${PACKAGE_VERSION}" ]; then echo "--build-arg PACKAGE_VERSION is required"; exit 1; fi
 
-ENV RUST_ARCHIVE=rust-1.27.0-x86_64-unknown-linux-gnu.tar.gz
+ENV RUST_ARCHIVE=rust-1.28.0-x86_64-unknown-linux-gnu.tar.gz
 ENV RUST_DOWNLOAD_URL=https://static.rust-lang.org/dist/$RUST_ARCHIVE
 
 RUN yum --quiet -y update && yum --quiet -y install git gcc curl openssl openssl-devel ca-certificates tar ruby-devel rubygems gcc make rpm-build libffi-devel && yum clean all --quiet
