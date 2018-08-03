@@ -5,6 +5,5 @@ After=syslog.target
 [Service]
 Type=simple
 ExecStart=/usr/sbin/mount_status_monitor
-EnvironmentFile=/etc/sysconfig/mount_status_monitor
 Restart=on-failure
 RestartSec=10s

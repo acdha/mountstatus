@@ -31,6 +31,6 @@ COPY packaging/sysconfig /mountstatus/
 RUN sed -i.bak '/console log/d' /mountstatus/upstart/*.conf
 
 RUN cargo build --release && strip target/release/mount_status_monitor
-RUN fpm -s dir -t rpm --rpm-dist el6 -n mount-status-monitor --version ${PACKAGE_VERSION} --replaces MountStatusMonitor target/release/mount_status_monitor=/usr/sbin/mount_status_monitor upstart/mount_status_monitor.conf=/etc/init/mount_status_monitor.conf sysconfig=/etc/sysconfig/mount_status_monitor
+RUN fpm -s dir -t rpm --rpm-dist el6 -n mount-status-monitor --version ${PACKAGE_VERSION} --replaces MountStatusMonitor --config-files /etc/sysconfig/mount_status_monitor target/release/mount_status_monitor=/usr/sbin/mount_status_monitor upstart/mount_status_monitor.conf=/etc/init/mount_status_monitor.conf sysconfig=/etc/sysconfig/mount_status_monitor
 
 CMD /bin/cp -vr /mountstatus/*.rpm /host-packages-volume
