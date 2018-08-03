@@ -1,6 +1,6 @@
 [package]
 name = "mount_status_monitor"
-version = "2.1.1"
+version = "2.1.2"
 authors = [ "Chris Adams <chris@improbable.org>" ]
 description = "Paranoid filesystem monitor which reports malfunctioning mountpoints"
 homepage = "https://github.com/acdha/mountstatus"
