@@ -49,7 +49,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use argparse::{ArgumentParser, Print, Store, StoreOption, StoreTrue};
-use syslog::Facility;
+use syslog::{Facility, Formatter3164};
 use wait_timeout::ChildExt;
 
 use rayon::prelude::*;
@@ -155,7 +155,14 @@ fn real_main() -> Result<()> {
         );
     }
 
-    let syslog = syslog::unix(Facility::LOG_DAEMON).chain_err(|| "Unable to connect to syslog")?;
+    let formatter = Formatter3164 {
+        facility: Facility::LOG_USER,
+        hostname: None,
+        process: "mount_status_monitor".into(),
+        pid: 0,
+    };
+
+    let syslog = syslog::unix(formatter).chain_err(|| "Unable to connect to syslog")?;
 
     let mut mount_statuses = HashMap::<PathBuf, MountStatus>::new();
 
@@ -368,9 +375,11 @@ fn check_mount(mount_point: &Path) -> Result<MountStatus> {
                 Some(0) => Ok(MountStatus::Alive),
                 Some(rc) => Ok(MountStatus::CheckFailed(rc)),
                 None => {
+                    use std::os::unix::process::ExitStatusExt;
+
                     // If there isn't a return code, there _should_ always be a signal
                     Ok(MountStatus::CheckSignaled(
-                        exit_status.unix_signal().unwrap_or(0),
+                        exit_status.signal().unwrap_or(0),
                     ))
                 }
             }

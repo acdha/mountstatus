@@ -9,18 +9,18 @@ readme = "README.markdown"
 license =  "CC0-1.0"
 
 [dependencies]
-wait-timeout = "0.1.5"
-libc = "0.2.42"
 syslog = "<4.0.0"   # Upgrade when https://github.com/Geal/rust-syslog/pull/38 is closed
-lazy_static = { version="1.0.2", optional=true }
-hostname = { version="0.1.5", optional=true }
-argparse = "0.2.1"
-error-chain = "0.12"
-rayon = "1.0.2"
-protobuf = "2.0.4"
+wait-timeout = "0.2.0"
+libc = "0.2.45"
+lazy_static = { version = "1.2.0", optional = true }
+hostname = { version = "0.1.5", optional = true }
+argparse = "0.2.2"
+error-chain = "0.12.0"
+rayon = "1.0.3"
+protobuf = "2.2.1"
 
 [dependencies.prometheus]
-version = "0.4"
+version = "0.4.2"
 features = ["push"]
 optional = true
 
