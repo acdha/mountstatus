@@ -1,25 +1,25 @@
 /*
-    Paranoid mount monitor for POSIX operating systems
+   Paranoid mount monitor for POSIX operating systems
 
-    The general idea is that some classes of storage failure require care to
-    detect because any access to the mountpoint including your monitoring check
-    will block and in the case of certain kernel bugs that may be completely
-    irrecoverable or will require a considerable delay – often days by default –
-    to exhaust repeated TCP and NFS timeouts.
+   The general idea is that some classes of storage failure require care to
+   detect because any access to the mountpoint including your monitoring check
+   will block and in the case of certain kernel bugs that may be completely
+   irrecoverable or will require a considerable delay – often days by default –
+   to exhaust repeated TCP and NFS timeouts.
 
-    This can't be solved easily by using asynchronous I/O APIs because key
-    platforms like Linux don't implement an async stat(2) equivalent. This
-    program uses the broadly-portable approach of launching an external child
-    process asynchronously with a timeout. If it fails to respond by the
-    deadline, we'll send it a SIGKILL and avoid further checks until the process
-    disappears to avoid accumulating blocked check processes.
+   This can't be solved easily by using asynchronous I/O APIs because key
+   platforms like Linux don't implement an async stat(2) equivalent. This
+   program uses the broadly-portable approach of launching an external child
+   process asynchronously with a timeout. If it fails to respond by the
+   deadline, we'll send it a SIGKILL and avoid further checks until the process
+   disappears to avoid accumulating blocked check processes.
 
-    The major improvements of the Rust version compared to the original C
-    version are the use of persistent state to avoid having more than one check
-    pending for any given mountpoint and the ability to send metrics to a
-    Prometheus push-gateway so they will be alertable even if the local system
-    is severely degraded.
- */
+   The major improvements of the Rust version compared to the original C
+   version are the use of persistent state to avoid having more than one check
+   pending for any given mountpoint and the ability to send metrics to a
+   Prometheus push-gateway so they will be alertable even if the local system
+   is severely degraded.
+*/
 
 extern crate argparse;
 extern crate libc;
@@ -57,13 +57,13 @@ use rayon::prelude::*;
 mod errors;
 mod get_mounts;
 
-use errors::*;
 
 fn handle_syslog_error(err: std::io::Error) -> usize {
     // Convenience function allowing all of our syslog calls to use .unwrap_or_else
     eprintln!("Syslog failed: {}", err);
     0
 }
+use crate::errors::*;
 
 #[derive(Debug)]
 enum MountStatus {
@@ -86,7 +86,7 @@ impl MountStatus {
     }
 }
 
-quick_main!{ real_main }
+quick_main! { real_main }
 
 fn real_main() -> Result<()> {
     struct Options {
@@ -230,7 +230,7 @@ fn push_to_prometheus(
 
     prometheus::push_metrics(
         "mount_status_monitor",
-        labels!{"instance".to_owned() => prometheus_instance.to_owned(), },
+        labels! {"instance".to_owned() => prometheus_instance.to_owned(), },
         gateway,
         prometheus::gather(),
     )
