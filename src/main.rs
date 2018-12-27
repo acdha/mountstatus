@@ -28,6 +28,9 @@ extern crate syslog;
 extern crate wait_timeout;
 
 #[macro_use]
+extern crate log;
+
+#[macro_use]
 extern crate error_chain;
 
 #[cfg(feature = "with_prometheus")]
@@ -49,20 +52,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use argparse::{ArgumentParser, Print, Store, StoreOption, StoreTrue};
-use syslog::{Facility, Formatter3164};
-use wait_timeout::ChildExt;
-
 use rayon::prelude::*;
+use wait_timeout::ChildExt;
 
 mod errors;
 mod get_mounts;
 
-
-fn handle_syslog_error(err: std::io::Error) -> usize {
-    // Convenience function allowing all of our syslog calls to use .unwrap_or_else
-    eprintln!("Syslog failed: {}", err);
-    0
-}
 use crate::errors::*;
 
 #[derive(Debug)]
@@ -155,19 +150,13 @@ fn real_main() -> Result<()> {
         );
     }
 
-    let formatter = Formatter3164 {
-        facility: Facility::LOG_USER,
-        hostname: None,
-        process: "mount_status_monitor".into(),
-        pid: 0,
-    };
-
-    let syslog = syslog::unix(formatter).chain_err(|| "Unable to connect to syslog")?;
+    syslog::init_unix(syslog::Facility::LOG_USER, log::LevelFilter::Debug)
+        .chain_err(|| "Unable to connect to syslog")?;
 
     let mut mount_statuses = HashMap::<PathBuf, MountStatus>::new();
 
     loop {
-        check_mounts(&mut mount_statuses, &syslog, options.print_bad_mounts);
+        check_mounts(&mut mount_statuses, options.print_bad_mounts);
 
         // We calculate these values each time because a filesystem may have been
         // mounted or unmounted since the last check:
@@ -177,13 +166,7 @@ fn real_main() -> Result<()> {
             .filter(|&(_, status)| !status.success())
             .count();
 
-        // TODO: consider making this debug or sending it to stdout?
-        syslog
-            .info(format!(
-                "Checked {} mounts; {} are dead",
-                total_mounts, dead_mounts
-            ))
-            .unwrap_or_else(handle_syslog_error);
+        info!("Checked {} mounts; {} are dead", total_mounts, dead_mounts);
 
         #[cfg(feature = "with_prometheus")]
         {
@@ -236,11 +219,7 @@ fn push_to_prometheus(
     )
 }
 
-fn check_mounts(
-    mount_statuses: &mut HashMap<PathBuf, MountStatus>,
-    logger: &syslog::Logger,
-    print_bad_mounts: bool,
-) {
+fn check_mounts(mount_statuses: &mut HashMap<PathBuf, MountStatus>, print_bad_mounts: bool) {
     let mount_points = get_mounts::get_mount_points().unwrap_or_else(|err| {
         eprintln!("Failed to retrieve a list of mount-points: {:?}", err);
         std::process::exit(2);
@@ -265,34 +244,28 @@ fn check_mounts(
             {
                 match process.try_wait() {
                     Ok(Some(status)) => {
-                        logger
-                            .info(format!(
-                                "Slow check for mount {} exited with {} after {} seconds",
-                                mount_point.display(),
-                                status,
-                                start_time.elapsed().as_secs()
-                            ))
-                            .unwrap_or_else(handle_syslog_error);
+                        info!(
+                            "Slow check for mount {} exited with {} after {} seconds",
+                            mount_point.display(),
+                            status,
+                            start_time.elapsed().as_secs()
+                        );
                     }
                     Ok(None) => {
-                        logger
-                            .warning(format!(
-                                "Slow check for mount {} has not exited after {} seconds",
-                                mount_point.display(),
-                                start_time.elapsed().as_secs()
-                            ))
-                            .unwrap_or_else(handle_syslog_error);
+                        warn!(
+                            "Slow check for mount {} has not exited after {} seconds",
+                            mount_point.display(),
+                            start_time.elapsed().as_secs()
+                        );
                         return;
                     }
                     Err(e) => {
-                        logger
-                            .err(format!(
-                                "Stalled check on mount {} returned an error after {} seconds: {}",
-                                mount_point.display(),
-                                start_time.elapsed().as_secs(),
-                                e
-                            ))
-                            .unwrap_or_else(handle_syslog_error);
+                        error!(
+                            "Stalled check on mount {} returned an error after {} seconds: {}",
+                            mount_point.display(),
+                            start_time.elapsed().as_secs(),
+                            e
+                        );
                     }
                 }
             }
@@ -314,19 +287,14 @@ fn check_mounts(
                 _ => {}
             }
             if new_mount_status.success() {
-                logger
-                    .debug(format!(
-                        "Mount passed health-check: {}",
-                        mount_point.display()
-                    ))
-                    .unwrap_or_else(handle_syslog_error);
+                debug!("Mount passed health-check: {}", mount_point.display());
             } else {
                 let msg = format!("Mount failed health-check: {}", mount_point.display());
                 eprintln!("{}", msg);
                 if print_bad_mounts {
                     println!("{}", mount_point.display())
                 }
-                logger.err(msg).unwrap_or_else(handle_syslog_error);
+                error!("{}", msg);
             }
 
             *mount_status = new_mount_status;
