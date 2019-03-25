@@ -216,6 +216,7 @@ fn push_to_prometheus(
         labels! {"instance".to_owned() => prometheus_instance.to_owned(), },
         gateway,
         prometheus::gather(),
+        None
     )
 }
 
