@@ -1,6 +1,6 @@
 PACKAGE_VERSION = $(shell cargo metadata --format-version=1 | jq -r '.packages[] | select(.name == "mount_status_monitor") | .version')
 
-all: local deb el6 el7
+all: local deb el7
 
 local:
 	install -d packages
@@ -15,6 +15,3 @@ el7: local
 	docker build -f Dockerfile.release-el7 -t mountstatus:release-el7 --build-arg PACKAGE_VERSION=${PACKAGE_VERSION} .
 	docker run --rm -v $(realpath packages):/host-packages-volume mountstatus:release-el7
 
-el6: local
-	docker build -f Dockerfile.release-el6 -t mountstatus:release-el6 --build-arg PACKAGE_VERSION=${PACKAGE_VERSION} .
-	docker run --rm -v $(realpath packages):/host-packages-volume mountstatus:release-el6
