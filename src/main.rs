@@ -199,10 +199,7 @@ fn push_to_prometheus(
             register_gauge!("dead_mountpoints", "Number of unresponsive mountpoints").unwrap();
     }
 
-    let prometheus_instance = match hostname::get_hostname() {
-        Some(hostname) => hostname,
-        None => return Err(prometheus::Error::Msg("Unable to retrieve hostname".into())),
-    };
+    let prometheus_instance = hostname::get().unwrap();
 
     // The Prometheus metrics are defined as floats so we need to convert;
     // for monitoring the precision loss in general is fine and it's
@@ -213,10 +210,10 @@ fn push_to_prometheus(
 
     prometheus::push_metrics(
         "mount_status_monitor",
-        labels! {"instance".to_owned() => prometheus_instance.to_owned(), },
+        labels! {"instance".to_owned() => String::from(prometheus_instance.to_str().unwrap())},
         gateway,
         prometheus::gather(),
-        None
+        None,
     )
 }
 
