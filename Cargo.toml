@@ -21,7 +21,7 @@ protobuf = "2.10.2"
 log = "0.4.8"
 
 [dependencies.prometheus]
-version = "0.8.0"
+version = "0.9.0"
 features = ["push"]
 optional = true
 
