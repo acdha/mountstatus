@@ -1,4 +1,4 @@
-FROM rust:1.41.1
+FROM rust:1.50.0
 ARG PACKAGE_VERSION
 RUN if [ -z "${PACKAGE_VERSION}" ]; then echo "--build-arg PACKAGE_VERSION is required"; exit 1; fi
 
