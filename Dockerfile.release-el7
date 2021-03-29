@@ -5,7 +5,10 @@ RUN if [ -z "${PACKAGE_VERSION}" ]; then echo "--build-arg PACKAGE_VERSION is re
 ENV RUST_ARCHIVE=rust-1.50.0-x86_64-unknown-linux-gnu.tar.gz
 ENV RUST_DOWNLOAD_URL=https://static.rust-lang.org/dist/$RUST_ARCHIVE
 
-RUN yum --quiet -y update && yum --quiet -y install git gcc curl openssl openssl-devel ca-certificates tar ruby-devel rubygems gcc make rpm-build libffi-devel && yum clean all --quiet
+RUN yum --quiet -y update && yum --quiet -y install git gcc curl openssl openssl-devel ca-certificates tar gcc make rpm-build libffi-devel && yum clean all --quiet
+
+RUN yum install --quiet -y centos-release-scl && yum install --quiet -y rh-ruby23 rh-ruby23-rubygems rh-ruby23-ruby-devel && yum clean all --quiet
+RUN scl enable rh-ruby23 'gem install --no-ri --no-rdoc json && gem install --no-ri --no-rdoc fpm && gem clean'
 
 WORKDIR /rust
 
@@ -15,8 +18,6 @@ RUN curl -fsOSL $RUST_DOWNLOAD_URL \
     && rm $RUST_ARCHIVE \
     && ./install.sh --without=rust-docs
 
-RUN gem install --no-ri --no-rdoc json && gem install --no-ri --no-rdoc fpm && gem clean
-
 WORKDIR /mountstatus
 
 COPY Cargo.toml /mountstatus/
@@ -25,6 +26,6 @@ COPY packaging/systemd/ /mountstatus/systemd/
 COPY packaging/sysconfig /mountstatus/
 
 RUN cargo build --release && strip target/release/mount_status_monitor
-RUN fpm -s dir -t rpm --rpm-dist el7 -n mount-status-monitor --version ${PACKAGE_VERSION} --replaces MountStatusMonitor target/release/mount_status_monitor=/usr/sbin/mount_status_monitor systemd/mount_status_monitor.service=/etc/systemd/system/mount_status_monitor.service
+RUN scl enable rh-ruby23 "fpm -s dir -t rpm --rpm-dist el7 -n mount-status-monitor --version ${PACKAGE_VERSION} --replaces MountStatusMonitor target/release/mount_status_monitor=/usr/sbin/mount_status_monitor systemd/mount_status_monitor.service=/etc/systemd/system/mount_status_monitor.service"
 
 CMD /bin/cp -vr /mountstatus/*.rpm /host-packages-volume
