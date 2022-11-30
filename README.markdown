@@ -83,7 +83,7 @@ worse.
 Thanks to the following Rust community members who volunteered to review &
 improve this code, listed in alphabetical order:
 
-* Pascal Hertleif (@killercup)
-* Paul Daniel Faria (@Nashenas88)
-* Rahul Sharma (@creativcoder)
-* Zachary Dremann (@Dr-Emann)
+- Pascal Hertleif (@killercup)
+- Paul Daniel Faria (@Nashenas88)
+- Rahul Sharma (@creativcoder)
+- Zachary Dremann (@Dr-Emann)

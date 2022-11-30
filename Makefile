@@ -14,4 +14,3 @@ deb: local
 el7: local
 	docker build -f Dockerfile.release-el7 -t mountstatus:release-el7 --build-arg PACKAGE_VERSION=${PACKAGE_VERSION} .
 	docker run --rm -v $(realpath packages):/host-packages-volume mountstatus:release-el7
-
