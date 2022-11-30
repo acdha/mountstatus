@@ -12,7 +12,14 @@ use libc::{c_int, statfs};
 pub static MNT_NOWAIT: i32 = 2;
 
 extern "C" {
-    #[cfg_attr(target_os = "macos", link_name = "getmntinfo$INODE64")]
+    #[cfg_attr(
+        all(target_os = "macos", target_arch = "x86_64"),
+        link_name = "getmntinfo$INODE64"
+    )]
+    #[cfg_attr(
+        all(target_os = "macos", target_arch = "aarch64"),
+        link_name = "getmntinfo"
+    )]
     fn getmntinfo(mntbufp: *mut *mut statfs, flags: c_int) -> c_int;
 }
 
