@@ -7,3 +7,6 @@ Type=simple
 ExecStart=/usr/sbin/mount_status_monitor
 Restart=on-failure
 RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
