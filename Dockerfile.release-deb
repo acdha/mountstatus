@@ -1,9 +1,9 @@
-FROM rust:1-buster
+FROM rust:1
 ARG PACKAGE_VERSION
 RUN if [ -z "${PACKAGE_VERSION}" ]; then echo "--build-arg PACKAGE_VERSION is required"; exit 1; fi
 
 RUN apt-get -qqy update && apt-get -qqy install ruby ruby-dev rubygems build-essential && apt-get clean
-RUN gem install --no-ri --no-rdoc --quiet fpm && gem clean
+RUN gem install --quiet fpm && gem clean
 
 WORKDIR /mountstatus
 

@@ -1,7 +1,7 @@
 exclude: ".*/vendor/.*"
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v5.0.0
     hooks:
       - id: check-added-large-files
         args: ["--maxkb=256"]
@@ -26,16 +26,11 @@ repos:
         args: ["--autofix", "--no-sort-keys", "--indent=4"]
       - id: trailing-whitespace
   - repo: https://github.com/pre-commit/mirrors-prettier
-    rev: v3.0.0-alpha.4
+    rev: v4.0.0-alpha.8
     hooks:
       - id: prettier
         files: \.(markdown|md)$
   - repo: https://github.com/gruntwork-io/pre-commit
-    rev: v0.1.18
+    rev: v0.1.25
     hooks:
       - id: shellcheck
-  - repo: https://github.com/doublify/pre-commit-rust
-    rev: v1.0
-    hooks:
-      - id: fmt
-      - id: cargo-check

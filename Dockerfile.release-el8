@@ -1,0 +1,30 @@
+FROM amazonlinux:2023
+ARG PACKAGE_VERSION
+RUN if [ -z "${PACKAGE_VERSION}" ]; then echo "--build-arg PACKAGE_VERSION is required"; exit 1; fi
+
+ENV RUST_ARCHIVE=rust-1.80.1-x86_64-unknown-linux-gnu.tar.gz
+ENV RUST_DOWNLOAD_URL=https://static.rust-lang.org/dist/$RUST_ARCHIVE
+
+RUN yum --quiet -y update && yum --quiet -y install bash ca-certificates diffutils gcc git-core gzip make openssl openssl-devel patch python rpm-build rpm-devel rpmdevtools rpmlint systemd tar && yum clean all --quiet
+
+WORKDIR /rust
+
+RUN curl -fsOSL $RUST_DOWNLOAD_URL \
+    && curl -s $RUST_DOWNLOAD_URL.sha256 | sha256sum -c - \
+    && tar -C /rust -xzf $RUST_ARCHIVE --strip-components=1 \
+    && rm $RUST_ARCHIVE \
+    && ./install.sh --without=rust-docs
+
+WORKDIR /mountstatus
+
+COPY Cargo.toml /mountstatus/
+COPY src/ /mountstatus/src/
+COPY packaging/systemd/ /mountstatus/systemd/
+
+RUN cargo build --release && strip target/release/mount_status_monitor
+
+COPY Cargo.toml LICENSE mount-status-monitor.spec /mountstatus/
+
+RUN rpmbuild -bb mount-status-monitor.spec
+
+CMD /bin/cp -vr /root/rpmbuild/RPMS/x86_64/*.rpm /host-packages-volume
