@@ -1,11 +1,11 @@
-FROM amazonlinux:2023
+FROM almalinux:8
 ARG PACKAGE_VERSION
 RUN if [ -z "${PACKAGE_VERSION}" ]; then echo "--build-arg PACKAGE_VERSION is required"; exit 1; fi
 
 ENV RUST_ARCHIVE=rust-1.80.1-x86_64-unknown-linux-gnu.tar.gz
 ENV RUST_DOWNLOAD_URL=https://static.rust-lang.org/dist/$RUST_ARCHIVE
 
-RUN yum --quiet -y update && yum --quiet -y install bash ca-certificates diffutils gcc git-core gzip make openssl openssl-devel patch python rpm-build rpm-devel rpmdevtools rpmlint systemd tar && yum clean all --quiet
+RUN yum --quiet -y update && yum --quiet -y install bash ca-certificates diffutils gcc git-core gzip make openssl openssl-devel patch rpm-build rpm-devel rpmdevtools rpmlint systemd tar && yum clean all --quiet
 
 WORKDIR /rust
 
