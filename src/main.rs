@@ -89,12 +89,14 @@ fn real_main() -> Result<()> {
         poll_interval: u64,
         prometheus_push_gateway: Option<String>,
         print_bad_mounts: bool,
+        verbose: bool,
     }
     let mut options = Options {
         once_only: false,
         poll_interval: 60,
         prometheus_push_gateway: None,
         print_bad_mounts: false,
+        verbose: false,
     };
 
     {
@@ -138,6 +140,12 @@ fn real_main() -> Result<()> {
             "Print bad mounts on standard output",
         );
 
+        ap.refer(&mut options.verbose).add_option(
+            &["-v", "--verbose"],
+            StoreTrue,
+            "Enable debug-level logging, including per-mount health-check results",
+        );
+
         ap.parse_args_or_exit();
     }
 
@@ -150,7 +158,13 @@ fn real_main() -> Result<()> {
         );
     }
 
-    syslog::init_unix(syslog::Facility::LOG_USER, log::LevelFilter::Debug)
+    let log_level = if options.verbose {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    };
+
+    syslog::init_unix(syslog::Facility::LOG_USER, log_level)
         .chain_err(|| "Unable to connect to syslog")?;
 
     let mut mount_statuses = HashMap::<PathBuf, MountStatus>::new();
